@@ -48,6 +48,8 @@ let jsonpN=0;
 function jsonp(body){return new Promise((ok,bad)=>{const cb='__ptcb'+(++jsonpN)+'_'+Date.now(),sc=document.createElement('script');
   const done=()=>{clearTimeout(t);delete window[cb];sc.remove()},t=setTimeout(()=>{done();bad(new Error('응답 없음'))},15000);
   window[cb]=j=>{done();ok(j)};sc.onerror=()=>{done();bad(new Error('연결 실패'))};
+  /* the script ran but never called back: the deployed Apps Script predates JSONP support */
+  sc.onload=()=>setTimeout(()=>{if(window[cb]){done();bad(new Error('시트 코드가 예전 버전이에요'))}},50);
   sc.src=SYNC_URL+'?cb='+cb+'&p='+encodeURIComponent(JSON.stringify(body));document.head.appendChild(sc)})}
 /* one readable row for the trainer's sheet; the full log goes along as JSON for restoring */
 function sheetRow(lg){
@@ -558,7 +560,7 @@ function bindTrain(v){
 /* ---------- clear overlay ---------- */
 /* status line on the workout-complete screen, refreshed whenever a sync round finishes */
 function paintClearSync(){const el=document.getElementById('csync');if(!el)return;
-  const st=syncState==='ok'?['ok','✓ 오늘 기록이 팀 시트에 저장됐어요']:syncState==='auth'?['ng','✗ 이름·PIN이 시트와 맞지 않아 저장 못 했어요. 내 정보에서 확인해 주세요']:syncState==='wait'?['ng','인터넷이 연결되면 자동으로 저장돼요. 기록은 폰에 있어요']:['','팀 시트에 저장 중...'];
+  const st=syncState==='ok'&&syncUnverified?['','시트로 보냈어요. 저장 확인은 못 했어요 (시트 코드 재배포가 필요할 수 있어요)']:syncState==='ok'?['ok','✓ 오늘 기록이 팀 시트에 저장됐어요']:syncState==='auth'?['ng','✗ 이름·PIN이 시트와 맞지 않아 저장 못 했어요. 내 정보에서 확인해 주세요']:syncState==='wait'?['ng','인터넷이 연결되면 자동으로 저장돼요. 기록은 폰에 있어요']:['','팀 시트에 저장 중...'];
   el.className='sendr '+st[0];el.textContent=st[1]}
 function showClear(keys,lvUp,wrapped){
   clearInterval(tInt);document.getElementById('timer').hidden=true;
