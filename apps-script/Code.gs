@@ -7,12 +7,15 @@
    - 회원: 이름, 1RM, 사이클
    - 원본: 앱이 기록을 복원할 때 쓰는 데이터 (수정하지 마세요)
    - 코칭: 주말에 Claude가 써준 회원별 코칭을 붙여넣는 곳. 회원 앱에 자동으로 떠요
-   - Claude 요약: 메뉴 "PT 루틴 → 이번 주 Claude용 요약 만들기"를 누르면 생겨요 */
+   - Claude 요약: 메뉴 "PT 루틴 → 이번 주 Claude용 요약 만들기"를 누르면 생겨요
+   - 현황: 회원별 오늘 운동·이번 주 횟수·마지막 저장. 기록이 들어올 때마다 자동으로 새로 써요
+   - 설정: B2 칸에 관리자 PIN을 적으면 웹앱 기록 탭의 "팀 현황 (트레이너용)"에서 현황을 볼 수 있어요 */
 
 const LOG_HEAD = ['이름', '날짜', '운동', '완료 세트', '종목별 기록', '칼로리', '단백질(g)', '체중', '걸음 수', '수면', '컨디션', '통증', '식단', '마지막 저장'];
 const MEM_HEAD = ['이름', 'PIN 확인값', '벤치 1RM', '데드 1RM', '스쿼트 1RM', 'OHP 1RM', '사이클', '가입', '마지막 저장'];
 const RAW_HEAD = ['이름', '키', '데이터', '저장 시각'];
 const COACH_HEAD = ['이름', '주 시작일', '한줄 코멘트', '잘한 점', '고칠 점', '다음 주 목표', '무게 지정', '종목 교체', '1RM 갱신'];
+const STATUS_HEAD = ['이름', '오늘', '이번 주 운동', '최근 운동일', '최근 체중', '마지막 저장'];
 const KEY_RE = /^pt-(log-\d{4}-\d{2}-\d{2}|cycle|profile)$/;
 
 function doPost(e) {
@@ -54,6 +57,7 @@ function handle(req) {
   if (req.action === 'save') return save(req);
   if (req.action === 'load') return load(req);
   if (req.action === 'coach') return coach(req);
+  if (req.action === 'status') return status(req);
   if (req.action === 'check') { const a = auth(req, false); return a.error ? {ok: false, error: a.error} : {ok: true}; }
   return {ok: false, error: '알 수 없는 요청'};
 }
@@ -127,6 +131,7 @@ function save(req) {
     saved++;
   });
   mem.getRange(a.row, 9).setValue(t);
+  writeStatus();
   return {ok: true, saved: saved, at: t};
 }
 
@@ -186,6 +191,7 @@ function splitCoach(text) {
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('PT 루틴').addItem('이번 주 Claude용 요약 만들기', 'weeklyPrompt').addToUi();
   sheet('코칭', COACH_HEAD);
+  adminPin();
 }
 
 /* builds one cell with instructions + the last 7 days of every member, ready to paste into Claude */
@@ -232,4 +238,50 @@ function weeklyPrompt() {
   SpreadsheetApp.getActive().setActiveSheet(sh);
   try { SpreadsheetApp.getUi().alert('"Claude 요약" 탭의 A2 칸을 복사해서 Claude에게 붙여넣으세요. (회원 ' + mem.length + '명, ' + logs.length + '일치 기록)'); } catch (e) {}
   return text;
+}
+
+/* ---------- 현황 (team status) ---------- */
+function adminPin() {
+  const sh = sheet('설정', ['항목', '값']);
+  if (sh.getLastRow() < 2) sh.appendRow(['관리자 PIN', '']);
+  return String(sh.getDataRange().getValues()[1][1] || '').trim();
+}
+
+/* one row per member: today's workout, workouts this week (Mon~), last workout, latest weight, last save */
+function statusRows() {
+  const tz = 'Asia/Seoul', fmt = d => Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+  const now_ = new Date(), today = fmt(now_);
+  const mon = new Date(now_.getTime());
+  while (Utilities.formatDate(mon, tz, 'u') !== '1') mon.setTime(mon.getTime() - 864e5);
+  const monday = fmt(mon);
+  const logs = sheet('기록', LOG_HEAD).getDataRange().getValues().slice(1).map(r => {
+    r = r.slice(); r[1] = r[1] instanceof Date ? fmt(r[1]) : String(r[1]).replace(/^'/, ''); return r;
+  });
+  const worked = r => r[2] && !/휴식/.test(String(r[2]));
+  const finished = r => worked(r) && !/진행/.test(String(r[2]));
+  return sheet('회원', MEM_HEAD).getDataRange().getValues().slice(1).map(m => {
+    const mine = logs.filter(r => String(r[0]) === String(m[0])).sort((x, y) => x[1].localeCompare(y[1]));
+    const td = mine.find(r => r[1] === today);
+    const last = mine.filter(worked).pop();
+    const w = mine.filter(r => r[7] !== '' && r[7] != null).pop();
+    const saved = m[8] instanceof Date ? Utilities.formatDate(m[8], tz, 'yyyy-MM-dd HH:mm:ss') : String(m[8] || '');
+    return [String(m[0]), td && td[2] ? String(td[2]) : '', mine.filter(r => r[1] >= monday && r[1] <= today && finished(r)).length,
+      last ? last[1] : '', w ? String(w[7]) : '', saved];
+  }).sort((x, y) => String(y[5]).localeCompare(String(x[5])));
+}
+
+function writeStatus() {
+  try {
+    const rows = statusRows();
+    const sh = sheet('현황', STATUS_HEAD);
+    sh.clearContents();
+    sh.getRange(1, 1, rows.length + 1, STATUS_HEAD.length).setValues([STATUS_HEAD].concat(rows));
+  } catch (err) {}
+}
+
+function status(req) {
+  const pin = adminPin();
+  if (!pin) return {ok: false, error: '시트의 "설정" 탭 B2 칸에 관리자 PIN을 먼저 적어주세요'};
+  if (String(req.admin || '').trim() !== pin) return {ok: false, error: '관리자 PIN이 맞지 않아요'};
+  return {ok: true, head: STATUS_HEAD, rows: statusRows(), at: now()};
 }
