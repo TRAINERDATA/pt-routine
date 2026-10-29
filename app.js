@@ -22,8 +22,46 @@ const now = new Date(); const today = ymd(now);
 /* A/B week: main lifts fixed, accessories alternate weekly. Week of 2026-10-12 = A */
 const store = {
   get(k,f){try{const v=localStorage.getItem(k);return v?JSON.parse(v):f}catch(e){return f}},
-  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+  set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}markPending(k)}
 };
+/* ---------- Google Sheet sync ----------
+   every change to a log, the cycle or the profile is queued in pt-pending and posted to the
+   Apps Script web app (SYNC_URL in routine.js). Name + PIN identify the member on the sheet. */
+const SYNC_RE=/^pt-(log-\d{4}-\d{2}-\d{2}|cycle|profile)$/;
+let syncState='',syncErr='',syncT=null,syncBusy=false,syncAgain=false;
+function syncOn(){return !!(SYNC_URL&&PROF&&PROF.name&&PROF.pin)}
+function markPending(k){if(!SYNC_URL||!SYNC_RE.test(k))return;const p=store.get('pt-pending',{});p[k]=Date.now();
+  try{localStorage.setItem('pt-pending',JSON.stringify(p))}catch(e){}queueSync()}
+function markAllPending(){try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&SYNC_RE.test(k))markPending(k)}}catch(e){}}
+function queueSync(ms){if(!syncOn()||syncState==='auth')return;clearTimeout(syncT);syncT=setTimeout(flushSync,ms==null?1500:ms)}
+async function syncPost(body){const r=await fetch(SYNC_URL,{method:'POST',body:JSON.stringify(body)});const j=await r.json();if(!j.ok)throw Object.assign(new Error(j.error||'저장 실패'),{auth:/PIN|이름/.test(j.error||'')});return j}
+/* one readable row for the trainer's sheet; the full log goes along as JSON for restoring */
+function sheetRow(lg){
+  const parts=[],det=[];let sets=0;
+  Object.keys(BASE).forEach(k=>Object.entries(lg[k]||{}).forEach(([i,st])=>{const n=(st.sets||[]).filter(Boolean).length;sets+=n;
+    if(n||st.kg||st.memo)det.push(`${st.n||(BASE[k].ex[i]||{}).n} ${st.kg||'?'} ${n}세트${st.memo?' ('+st.memo+')':''}`)}));
+  const dk=doneKeys(lg);if(dk.length)parts.push(dk.map(x=>DAYS[x].name).join('+'));else if(workoutKey(lg).length)parts.push(workoutKey(lg).map(x=>DAYS[x].name+' 진행').join('+'));
+  if(lg.cardio)parts.push(`유산소 ${lg.cardio.t} ${lg.cardio.min||'?'}분`);if(lg.pass&&!parts.length)parts.push('휴식');
+  const [kc,pr]=totals(lg),info=lg.info||{};
+  const meal=MEALS.filter(m=>m.id).map(m=>{const j=(lg.meals||{})[m.id],memo=(lg.memo||{})[m.id];const pick=j!=null&&m.o[j]?m.o[j][0]:'';return pick||memo?`${m.t.replace(/^[①②③]\s*/,'').split(' ')[0]}: ${pick}${memo?' / '+memo:''}`:''}).filter(Boolean).join(' · ');
+  return [parts.join(' + '),sets||'',det.join(', '),kc||'',pr||'',info.w||'',info.steps||'',info.sleep||'',info.cond||'',info.pain||'',meal]}
+async function flushSync(){
+  if(!syncOn())return;if(syncBusy){syncAgain=true;return}
+  const pend=store.get('pt-pending',{}),keys=Object.keys(pend);if(!keys.length){syncState='ok';renderHeader();return}
+  syncBusy=true;syncState='busy';renderHeader();
+  const batch=keys.slice(0,30),items=[];
+  batch.forEach(k=>{let v=store.get(k,null);if(v==null)return;
+    if(k==='pt-profile'){v=Object.assign({},v);delete v.pin}
+    const it={key:k,value:v};if(k.startsWith('pt-log-')){if(!Object.keys(v).length)return;it.row=sheetRow(v)}items.push(it)});
+  try{if(items.length)await syncPost({action:'save',name:PROF.name,pin:PROF.pin,items});
+    const cur=store.get('pt-pending',{});batch.forEach(k=>{if(cur[k]===pend[k])delete cur[k]});
+    try{localStorage.setItem('pt-pending',JSON.stringify(cur))}catch(e){}
+    syncState=Object.keys(cur).length?'busy':'ok';syncErr='';syncBusy=false;
+    if(Object.keys(cur).length||syncAgain){syncAgain=false;queueSync(200)}}
+  catch(e){syncBusy=false;syncErr=e.message||String(e);syncState=e.auth?'auth':'wait';if(!e.auth)queueSync(30000)}
+  renderHeader()}
+window.addEventListener('online',()=>queueSync(0));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')queueSync(0)});
 /* profile: name, 1RM per main lift, daily targets. Lives only in this browser */
 const LIFTS=[['bench','벤치프레스'],['dead','데드리프트'],['squat','스쿼트'],['ohp','오버헤드프레스']];
 let PROF=store.get('pt-profile',null);
@@ -166,8 +204,8 @@ function startTimer(sec,label){
 function renderHeader(){
   const x=totalXP(),lv=lvOf(x),inLv=x%XP_LV;
   document.getElementById('hdr').innerHTML=`<div class="lv"><span><small>LV</small><b>${lv}</b></span></div>
-  <div class="xp"><div class="xp-top"><span>${now.getMonth()+1}/${now.getDate()} (${WEEKDAY[now.getDay()]}) ${PROF&&PROF.name?`<em class="sync">· ${esc(PROF.name)}</em>`:''}</span><span><b>${inLv}</b> / ${XP_LV} XP</span></div><div class="xpbar"><i style="width:${inLv/XP_LV*100}%"></i></div></div>
-  <div class="streak"><b>${weekCount()}/${WEEK_GOAL}</b>이번 주</div>`;
+  <div class="xp"><div class="xp-top"><span>${now.getMonth()+1}/${now.getDate()} (${WEEKDAY[now.getDay()]}) ${PROF&&PROF.name?`<em class="sync">· ${esc(PROF.name)}</em>`:''}${syncOn()?`<em class="sync ${syncState==='ok'?'cloud':'local'}">${{ok:'● 시트 저장됨',busy:'● 저장 중',wait:'● 저장 대기',auth:'● PIN 확인'}[syncState]||'● 시트 연결'}</em>`:''}</span><span><b>${inLv}</b> / ${XP_LV} XP</span></div><div class="xpbar"><i style="width:${inLv/XP_LV*100}%"></i></div></div>
+  <div class="streak"><b>${weekCount()}/${WEEK_GOAL}</b>이번 주</div>${SYNC_URL&&PROF&&!PROF.pin?`<div class="offwarn">내 정보에서 PIN을 정하면 기록이 팀 시트에 자동 저장돼요</div>`:syncState==='auth'?`<div class="offwarn">시트 저장 안 됨: ${/PIN이 맞지/.test(syncErr)?'이 이름이 다른 PIN으로 이미 등록돼 있어요. 내 정보에서 PIN을 확인하거나, 다른 사람이면 이름을 바꿔 주세요 (예: 김민수)':esc(syncErr)}</div>`:syncState==='wait'?`<div class="offwarn">인터넷이 연결되면 자동으로 저장돼요. 기록은 폰에 안전하게 있어요</div>`:''}`;
 }
 const ICONS={
   home:'<svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>',
@@ -536,13 +574,17 @@ function bindLog(v){
 function renderSet(){
   const p=prof(),first=!PROF;
   return `<div class="sec"><div><span class="eyebrow">${first?'Welcome':'Profile'}</span><h2 style="font-size:28px">${first?'처음 오셨네요':'내 정보'}</h2></div>
-  ${first?'<p class="small" style="margin:0">이름과 1RM만 넣으면 종목별 시작 무게가 자동으로 계산돼요. 기록은 이 브라우저에만 저장되고 다른 팀원에게 보이지 않아요.</p>':''}
-  <div class="panel"><h3>이름</h3><div class="fields" style="grid-template-columns:1fr"><label for="s-name"><span>표시 이름</span><input id="s-name" placeholder="예: 민수" value="${esc(p.name||'')}"></label></div></div>
+  ${first?`<p class="small" style="margin:0">이름과 1RM만 넣으면 종목별 시작 무게가 자동으로 계산돼요.${SYNC_URL?' 기록은 팀 시트에 자동 저장돼서 폰을 바꿔도 이름과 PIN으로 다시 불러올 수 있어요.':' 기록은 이 브라우저에만 저장돼요.'}</p>`:''}
+  ${first&&SYNC_URL?`<div class="panel"><h3>이미 쓰던 기록이 있어요</h3><p class="small" style="margin:0">다른 폰이나 PC에서 쓰던 이름과 PIN을 넣으면 기록을 그대로 불러와요.</p>
+  <div class="fields"><label for="r-name"><span>이름</span><input id="r-name" placeholder="예: 민수"></label><label for="r-pin"><span>PIN</span><input id="r-pin" inputmode="numeric" type="password" placeholder="숫자 4~8자리"></label></div>
+  <button class="btn ghost" type="button" id="rload">기록 불러오기</button></div>`:''}
+  <div class="panel"><h3>이름${SYNC_URL?' · PIN':''}</h3><div class="fields"${SYNC_URL?'':' style="grid-template-columns:1fr"'}><label for="s-name"><span>표시 이름</span><input id="s-name" placeholder="예: 민수" value="${esc(p.name||'')}"></label>${SYNC_URL?`<label for="s-pin"><span>PIN (숫자 4~8자리)</span><input id="s-pin" inputmode="numeric" type="password" placeholder="예: 1234" value="${esc(p.pin||'')}"></label>`:''}</div>
+  ${SYNC_URL?'<p class="small" style="margin:0">이름과 PIN으로 팀 시트에 저장돼요. 다른 기기에서 기록을 불러올 때 필요하니 꼭 기억해 두세요. 이름이 다른 팀원과 겹치면 성까지 넣어주세요.</p>':''}</div>
   <div class="panel"><h3>1RM (1회 최대 무게)</h3><p class="small" style="margin:0">모르면 5회 겨우 드는 무게 × 1.15 정도로 넣으세요. 비워두면 그 부위 무게는 안 나와요.</p>
   <div class="fields">${LIFTS.map(([k,n])=>`<label for="s-${k}"><span>${n} (kg)</span><input id="s-${k}" inputmode="decimal" placeholder="예: 100" value="${esc((p.rm||{})[k]||'')}"></label>`).join('')}</div></div>
   <div class="panel"><h3>하루 목표</h3><div class="fields"><label for="s-kcal"><span>칼로리 (kcal)</span><input id="s-kcal" inputmode="numeric" value="${esc(p.kcal)}"></label><label for="s-prot"><span>단백질 (g)</span><input id="s-prot" inputmode="numeric" value="${esc(p.prot)}"></label></div></div>
   <button class="btn gold" type="button" id="ssave">${first?'시작하기':'저장'}</button>
-  ${first?'':`<div class="panel"><h3>백업 · 기기 옮기기</h3><p class="small" style="margin:0">기록은 이 브라우저에만 있어요. 폰을 바꾸거나 브라우저 데이터를 지우기 전에 백업 파일을 받아두세요.</p>
+  ${first?'':`<div class="panel"><h3>백업 · 기기 옮기기</h3><p class="small" style="margin:0">${SYNC_URL?'기록은 팀 시트에도 자동 저장돼요. 새 기기에서는 처음 화면의 "기록 불러오기"를 쓰면 돼요. 백업 파일은 혹시 몰라 따로 보관하고 싶을 때 쓰세요.':'기록은 이 브라우저에만 있어요. 폰을 바꾸거나 브라우저 데이터를 지우기 전에 백업 파일을 받아두세요.'}</p>
   <div class="row" style="gap:8px"><button class="btn ghost" type="button" id="sexp">백업 받기</button><button class="btn ghost" type="button" id="simp">백업 불러오기</button></div><input type="file" id="sfile" accept="application/json,.json" hidden></div>
   <button class="btn ghost" type="button" id="swipe" style="padding:10px;font-size:13px">이 기기의 내 기록 전부 지우기</button>`}</div>`;
 }
@@ -551,8 +593,23 @@ function bindSet(){
   const $=id=>document.getElementById(id);
   $('ssave').onclick=()=>{const num=v=>{const n=parseFloat(String(v).replace(',','.'));return n>0?n:''};
     const rm={};LIFTS.forEach(([k])=>rm[k]=num($('s-'+k).value));
-    PROF={name:$('s-name').value.trim(),rm,kcal:num($('s-kcal').value)||DEFAULT_TARGETS.kcal,prot:num($('s-prot').value)||DEFAULT_TARGETS.prot};
-    store.set('pt-profile',PROF);location.hash='';location.reload()};
+    const name=$('s-name').value.trim(),pin=$('s-pin')?$('s-pin').value.trim():'';
+    if(!name){toast('이름을 넣어 주세요');return}
+    if(SYNC_URL&&!/^\d{4,8}$/.test(pin)){toast('PIN은 숫자 4~8자리로 정해 주세요');return}
+    const old=PROF||{};
+    PROF={name,pin,rm,kcal:num($('s-kcal').value)||DEFAULT_TARGETS.kcal,prot:num($('s-prot').value)||DEFAULT_TARGETS.prot};
+    store.set('pt-profile',PROF);
+    /* new identity on the sheet: send everything this device already has */
+    if(SYNC_URL&&(old.name!==name||old.pin!==pin))markAllPending();
+    location.hash='';location.reload()};
+  if($('rload'))$('rload').onclick=async()=>{const name=$('r-name').value.trim(),pin=$('r-pin').value.trim();
+    if(!name||!/^\d{4,8}$/.test(pin)){toast('이름과 PIN을 확인해 주세요');return}
+    const b=$('rload');b.disabled=true;b.textContent='불러오는 중...';
+    try{const j=await syncPost({action:'load',name,pin});
+      Object.entries(j.data||{}).forEach(([k,v])=>{if(!SYNC_RE.test(k))return;if(k==='pt-profile')v=Object.assign({},v,{name,pin});localStorage.setItem(k,JSON.stringify(v))});
+      if(!(j.data||{})['pt-profile'])localStorage.setItem('pt-profile',JSON.stringify({name,pin,rm:{},kcal:DEFAULT_TARGETS.kcal,prot:DEFAULT_TARGETS.prot}));
+      toast('기록을 불러왔어요');setTimeout(()=>{location.hash='';location.reload()},600)}
+    catch(e){toast(e.message||'불러오지 못했어요');b.disabled=false;b.textContent='기록 불러오기'}};
   if(!$('sexp'))return;
   $('sexp').onclick=()=>{const out={app:'pt-routine',v:1,at:new Date().toISOString(),data:{}};
     try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&k.startsWith('pt-'))out.data[k]=localStorage.getItem(k)}}catch(e){}
@@ -581,3 +638,4 @@ function render(keepScroll){
 }
 if(!PROF)view='set';
 render();
+queueSync(0);
