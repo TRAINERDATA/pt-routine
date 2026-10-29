@@ -9,7 +9,7 @@
 const SWAPS_PER_CYCLE = 2;
 /* 구글 시트 자동 저장: Apps Script 웹 앱 URL (https://script.google.com/macros/s/.../exec)
    비워두면 기록은 각자 브라우저에만 저장돼요. 설정 방법은 README의 "구글 시트 자동 저장" */
-const SYNC_URL = '';
+const SYNC_URL = 'https://script.google.com/macros/s/AKfycbw18C6CMiCPms693BoTwowZagy-zZuVnbU4tvtIn2zbcKHyMNP3sDOPfMZA5FtSv8MQ2A/exec';
 /* 새 팀원의 기본 목표. 각자 설정 화면에서 바꿀 수 있어요 */
 const DEFAULT_TARGETS = {kcal:2200, prot:160};
 const WEEK_GOAL = 5;
