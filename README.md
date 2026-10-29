@@ -14,6 +14,8 @@
 
 ## 팀원용: 시작하기
 
+📱 **그림으로 보는 시작 가이드 (아이폰·갤럭시)**: https://trainerdata.github.io/pt-routine/guide/
+
 1. 링크 열기: **https://trainerdata.github.io/pt-routine/**
 2. 처음 화면에서 이름, 1RM 4개(벤치·데드·스쿼트·OHP), 하루 목표 칼로리·단백질 입력 → **시작하기**
    - 1RM을 모르면 5회 겨우 드는 무게 × 1.15 정도로 넣으세요
