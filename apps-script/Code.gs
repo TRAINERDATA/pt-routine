@@ -17,6 +17,7 @@ const KEY_RE = /^pt-(log-\d{4}-\d{2}-\d{2}|cycle|profile)$/;
 
 function doPost(e) {
   let out;
+  ensureWeeklyTrigger();
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -133,6 +134,36 @@ function coach(req) {
     if (!best || week >= best.week) best = {week: week, comment: r[2], good: r[3], fix: r[4], goal: r[5], weights: r[6], swaps: r[7], rm: r[8]};
   });
   return {ok: true, coach: best};
+}
+
+/* every Saturday 7am the summary is rebuilt, so on a phone the trainer only has to copy A2 */
+function ensureWeeklyTrigger() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('weeklyTrigger')) return;
+  try {
+    ScriptApp.newTrigger('weeklyPrompt').timeBased().onWeekDay(ScriptApp.WeekDay.SATURDAY).atHour(7).inTimezone('Asia/Seoul').create();
+    props.setProperty('weeklyTrigger', '1');
+  } catch (err) {}
+}
+
+/* Claude's answer pasted into one cell (phones do that) is split into rows and columns */
+function onEdit(e) {
+  const sh = e.range.getSheet();
+  if (sh.getName() !== '코칭') return;
+  const v = e.range.getValue();
+  if (typeof v !== 'string' || (v.indexOf('\t') < 0 && v.indexOf('\n') < 0)) return;
+  const rows = splitCoach(v);
+  if (!rows.length) return;
+  sh.getRange(e.range.getRow(), 1, rows.length, COACH_HEAD.length).setValues(rows);
+}
+
+function splitCoach(text) {
+  return String(text).replace(/```[a-z]*/gi, '').split(/\r?\n/).map(l => l.trim()).filter(l => l && l.indexOf('\t') > 0).map(l => {
+    const cells = l.split('\t').map(x => x.trim()).slice(0, COACH_HEAD.length);
+    while (cells.length < COACH_HEAD.length) cells.push('');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cells[1])) cells[1] = "'" + cells[1];
+    return cells;
+  });
 }
 
 function onOpen() {
