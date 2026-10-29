@@ -30,8 +30,8 @@ let PROF=store.get('pt-profile',null);
 function prof(){return PROF||{name:'',rm:{},kcal:DEFAULT_TARGETS.kcal,prot:DEFAULT_TARGETS.prot}}
 function rnd(v,step){return Math.max(step,Math.round(v/step)*step)}
 function kgOf(w){const base=+((prof().rm||{})[w[0]]||0);if(!base)return '1RM 입력 필요';return w[2]==='db'?`한 손 ${rnd(base*w[1],2)}kg`:`${rnd(base*w[1],2.5)}kg`}
-const WEEK_AB=(()=>{const a=new Date(WEEK_A_START+'T12:00:00'),m=new Date(now);m.setHours(12,0,0,0);m.setDate(m.getDate()-((m.getDay()+6)%7));return Math.round((m-a)/6048e5)%2===0?'A':'B'})();
-Object.values(DAYS).forEach(d=>{d.tag+=' · WEEK '+WEEK_AB;d.ex.forEach((e,i,arr)=>{if(!e.b)return;if(WEEK_AB==='B'){const o=Object.assign({},e,e.b,{alt:e.n});delete o.b;if(!e.b.g)delete o.g;arr[i]=o}else{const o=Object.assign({},e,{alt:e.b.n});delete o.b;arr[i]=o}});d.ex.forEach(e=>{if(e.w)e.kg=kgOf(e.w)})});
+/* pristine team routine; the per-cycle version is rebuilt from this by applyCycle() */
+const BASE={};Object.entries(DAYS).forEach(([k,d])=>BASE[k]={tag:d.tag,ex:d.ex.map(e=>Object.assign({},e))});
 /* warm-up ramp from each person's working weight on the main lift */
 const MAIN_PCT={bench:.75,dead:.82,squat:.8,ohp:.75};
 Object.values(WU).forEach(L=>L.forEach(w=>{if(typeof w[1]!=='object')return;const {lift,name}=w[1],base=+((prof().rm||{})[lift]||0);
@@ -42,11 +42,31 @@ const logKey = 'pt-log-'+today;
 let log = store.get(logKey,{});
 function save(){store.set(logKey,log)}
 /* rotation: first day in ORDER not yet done this cycle. */
-let cycle = store.get('pt-cycle',null) || {done:[]};
-cycle.done = cycle.done.filter(k=>ORDER.includes(k));
+/* cycle.n counts finished rounds; each new round swaps a few accessories (see applyCycle) */
+let cycle = store.get('pt-cycle',null) || {done:[],n:0};
+cycle.done = cycle.done.filter(k=>ORDER.includes(k));cycle.n=cycle.n||0;
 function saveCycle(){store.set('pt-cycle',cycle)}
 function nextDay(){return ORDER.find(k=>!cycle.done.includes(k))||ORDER[0]}
-function markDone(keys){keys.forEach(k=>{if(!cycle.done.includes(k))cycle.done.push(k)});if(ORDER.every(k=>cycle.done.includes(k)))cycle.done=[];saveCycle()}
+/* returns true when this finished a full round */
+function markDone(keys){log.cn=log.cn||{};keys.forEach(k=>{if(log.cn[k]==null)log.cn[k]=cycle.n;if(!cycle.done.includes(k))cycle.done.push(k)});save();
+  let wrapped=false;if(ORDER.every(k=>cycle.done.includes(k))){cycle.done=[];cycle.n++;wrapped=true}saveCycle();if(wrapped)applyCycle();return wrapped}
+/* round a day was trained in: today's log pins it so finishing a round doesn't relabel today's exercises */
+function cnFor(k){return log.cn&&log.cn[k]!=null?log.cn[k]:cycle.n}
+/* round 0 = the team routine as written. From round 1 on, each day swaps SWAPS_PER_CYCLE accessories,
+   always starting from the original: least-recently-swapped slots go first, and each slot walks through its v list */
+const planMemo={};
+function plan(k,n){const id=k+n;if(planMemo[id])return planMemo[id];
+  const ex=BASE[k].ex,slots=ex.map((e,i)=>i).filter(i=>ex[i].v&&ex[i].v.length&&!ex[i].off);
+  const last={},times={};let picks={};
+  for(let c=1;c<=n;c++){let seed=(c*7919+k.charCodeAt(0)*131+k.charCodeAt(1))%2147483647;const rand=()=>(seed=seed*16807%2147483647)/2147483647;
+    const order=slots.map(i=>({i,r:rand()})).sort((a,b)=>(last[a.i]||0)-(last[b.i]||0)||a.r-b.r).slice(0,SWAPS_PER_CYCLE);
+    picks={};order.forEach(({i})=>{times[i]=(times[i]||0)+1;last[i]=c;picks[i]=(times[i]-1)%ex[i].v.length})}
+  return planMemo[id]=picks}
+function applyCycle(){Object.keys(BASE).forEach(k=>{const n=cnFor(k),picks=plan(k,n);
+  DAYS[k].tag=BASE[k].tag+' · CYCLE '+(n+1);
+  DAYS[k].ex=BASE[k].ex.map((e,i)=>{let o;if(picks[i]!=null){const v=e.v[picks[i]];o=Object.assign({},e,v,{alt:e.n,isNew:1});if(!v.g)delete o.g;if(!v.w)delete o.w;if(v.w)delete o.kg}else o=Object.assign({},e);
+    delete o.v;if(o.w)o.kg=kgOf(o.w);return o})})}
+applyCycle();
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function col(k){return `var(${PLATE[k]||'--p-gray'})`}
 function md(d){return d.slice(5).replace('-','/')}
@@ -94,13 +114,26 @@ function openWheel(name,w,r,done){
   sh.querySelector('.sbg').onclick=close;sh.querySelector('.sx').onclick=close;
   sh.querySelector('.sok').onclick=()=>{done(W_LIST[sel[0]],R_LIST[sel[1]]);close()};
 }
-function wr(k,i,e,st,L){const own=parseKg(st&&st.kg)||bodyKg(st&&st.kg);if(own)return own;const last=L&&(parseKg(L.kg)||bodyKg(L.kg));if(last)return last;const w=String(e.kg).match(/(\d+(?:\.\d+)?)/);const r=String(e.r).match(/(\d+)/);return [w?+w[1]:0,r?+r[1]:10]}
+function wr(k,i,e,st,L){const own=parseKg(st&&st.kg)||bodyKg(st&&st.kg);if(own)return own;const rc=recommend(k,i,e);if(rc)return [rc.w,rc.r];const w=String(e.kg).match(/(\d+(?:\.\d+)?)/);const r=String(e.r).match(/(\d+)/);return [w?+w[1]:0,r?+r[1]:10]}
 function bodyKg(s){const m=String(s||'').match(/맨몸\s*[x×*X]\s*(\d+)/);return m?[0,+m[1]]:null}
 function fmtWR(w,r){return `${w?w:'맨몸'}x${r}`}
 function parseKg(s){const m=String(s||'').replace(/kg/gi,'').match(/(\d+(?:\.\d+)?)\s*[x×*X]\s*(\d+)/);return m?[+m[1],+m[2]]:null}
 function guideOf(e){return GN[e.n]||e.g||null}
 function effEx(k,i,e,st){return st&&st.sw&&e.alt?Object.assign({},e,{n:e.alt,alt:e.n,g:null,why:'대체 운동'}):e}
-function lastFor(k,i,name){name=name||DAYS[k].ex[i].n;for(const d of allDates()){if(d===today)continue;const lg=store.get('pt-log-'+d,{});const st=lg[k]&&lg[k][i];if(st&&st.kg&&(!st.n||st.n===name))return {d,kg:st.kg,n:(st.sets||[]).filter(Boolean).length}}return null}
+/* past entries for an exercise by name, newest first (same exercise can sit on different days/slots) */
+function hist(name,max){const out=[];for(const d of allDates()){if(d===today)continue;const lg=store.get('pt-log-'+d,{});
+  Object.keys(BASE).forEach(k=>Object.entries(lg[k]||{}).forEach(([i,st])=>{if(st&&st.kg&&(st.n||(BASE[k].ex[i]||{}).n)===name)out.push({d,kg:st.kg,n:(st.sets||[]).filter(Boolean).length})}));
+  if(out.length>=max)break}return out.slice(0,max)}
+function lastFor(k,i,name){return hist(name||DAYS[k].ex[i].n,1)[0]||null}
+function repRange(r){const m=String(r).match(/(\d+)\s*~\s*(\d+)/);if(m)return [+m[1],+m[2]];const s=String(r).match(/(\d+)/);return s?[+s[1],+s[1]]:[8,12]}
+/* double progression: fill every set at the top of the rep range -> add weight; miss sets twice in a row -> back off 10% */
+function recommend(k,i,e){const H=hist(e.n,2);if(!H.length)return null;const p=parseKg(H[0].kg)||bodyKg(H[0].kg);if(!p)return null;
+  let [w,r]=p;const [lo,hi]=repRange(e.r),full=H[0].n>=e.s,db=/^한 손/.test(e.kg)||(e.w&&e.w[2]==='db');
+  if(full&&r>=hi){if(!w)return {w,r:r+1,why:'목표 횟수 다 채움 → 1회 더'};
+    const inc=db?2:(k==='LG'||/데드/.test(e.n))&&w>=60?5:2.5;return {w:+(w+inc).toFixed(1),r:lo,why:`목표 횟수 다 채움 → +${inc}kg`}}
+  if(full)return {w,r:Math.min(hi,r+1),why:'같은 무게로 1회 더'};
+  if(H[1]&&H[1].n<e.s&&w)return {w:rnd(w*.9,db?2:2.5),r:lo,why:'2번 연속 세트를 못 채움 → 10% 낮춰서 다시'};
+  return {w,r,why:'세트를 다 못 채움 → 같은 무게로 다시'}}
 function sentLabel(){return '오늘 기록 복사'}
 function finishDay(){copyText(buildLog(today,log))}
 async function copyText(txt){
@@ -151,6 +184,8 @@ function go(v){view=v;homeMode='';try{history.replaceState(null,'',v==='home'?lo
 
 /* ---------- HOME ---------- */
 function ring(p,txt){const r=36,C=2*Math.PI*r;return `<svg class="ring" viewBox="0 0 84 84" aria-hidden="true"><circle class="bgc" cx="42" cy="42" r="${r}"/><circle class="fgc" cx="42" cy="42" r="${r}" stroke-dasharray="${C}" stroke-dashoffset="${C*(1-p)}" transform="rotate(-90 42 42)"/><text x="42" y="49" text-anchor="middle">${txt}</text></svg>`}
+function newList(){const L=ORDER.flatMap(k=>DAYS[k].ex.filter(e=>e.isNew).map(e=>`${DAYS[k].name} · ${esc(e.n)}`));
+  return L.length?`<p class="small" style="margin:0">이번 사이클 새 종목: ${L.join(', ')}</p>`:'<p class="small" style="margin:0">첫 사이클은 기본 루틴 그대로. 한 바퀴 끝내면 부위마다 보조 종목이 조금씩 바뀌어요</p>'}
 function cycleBar(){return `<div class="cyc">${ORDER.map(k=>`<span class="${cycle.done.includes(k)?'on':''}${k===nextDay()?' nx':''}" style="--c:${col(k)}">${DAYS[k].name}</span>`).join('')}</div>`}
 /* ---------- growing character + titles ---------- */
 const TITLES=[[1,'헬린이'],[3,'루키'],[6,'레귤러'],[10,'아이언'],[15,'스틸'],[20,'비스트'],[25,'몬스터'],[30,'레전드']];
@@ -319,7 +354,7 @@ function renderHome(){
   Q.push(['걸음 8,000보',50,+info.steps>=8000,'food']);
   const doneN=Q.filter(q=>q[2]).length;
   return `<div class="sec">${buddyCard()}${PROF&&LIFTS.some(([k])=>+(PROF.rm||{})[k])?'':`<button type="button" class="fbt" data-go="set"><span class="grade" style="width:34px;height:34px;font-size:18px">!</span><span><small>시작 무게 계산</small>내 정보에서 1RM을 입력하면 종목별 무게가 나와요</span><b>›</b></button>`}${hero}
-  <div class="panel"><div class="row"><h3>루틴 순서</h3><span class="sp"></span><span class="small">끝낸 부위는 체크, 다 돌면 처음부터</span></div>${cycleBar()}</div>
+  <div class="panel"><div class="row"><h3>루틴 순서 · 사이클 ${cycle.n+1}</h3><span class="sp"></span><span class="small">한 바퀴 돌면 종목 일부 교체</span></div>${cycleBar()}${newList()}</div>
   <div class="week">${wk}</div>
   <div class="panel"><div class="row"><h3>일일 퀘스트</h3><span class="sp"></span><span class="small">${doneN} / ${Q.length}</span></div>
   ${Q.map(q=>`<button type="button" class="q${q[2]?' on':''}" data-go="${q[3]}"><span class="box">${q[2]?'✓':''}</span><span class="qt">${q[0]}</span><span class="xpv">${q[1]?'+'+q[1]+'XP':''}</span></button>`).join('')}</div>
@@ -363,9 +398,9 @@ function renderTrain(){
   its.forEach(({k,i,e},n)=>{
     const st=(log[k]&&log[k][i])||{sets:[],kg:''},sd=setsDone(log,k,i);e=effEx(k,i,e,st);const L=lastFor(k,i,e.n);
     html+=`<article class="ex${sd>=e.s?' complete':''}" data-k="${k}" data-i="${i}" style="--c:${col(k)}">
-    <div class="top"><span class="num">${sd>=e.s?'✓':n+1}</span><div style="min-width:0"><h3>${esc(e.n)}</h3>${keys.length>1?`<span class="why">${DAYS[k].name}</span> `:''}${e.why?`<span class="why">${esc(e.why)}</span>`:''}</div><span class="kg">${esc(e.kg)}<small>시작 무게</small></span></div>
+    <div class="top"><span class="num">${sd>=e.s?'✓':n+1}</span><div style="min-width:0"><h3>${esc(e.n)}</h3>${keys.length>1?`<span class="why">${DAYS[k].name}</span> `:''}${e.isNew&&!st.sw?`<span class="why" style="color:var(--ok)">NEW · 이번 사이클 </span>`:''}${e.why?`<span class="why">${esc(e.why)}</span>`:''}</div><span class="kg">${esc(e.kg)}<small>시작 무게</small></span></div>
     <div class="meta"><span><b>${e.s}×${esc(e.r)}</b></span><span>RIR <b>${esc(e.rir)}</b></span><span>휴식 <b>${esc(e.rest)}</b></span></div>
-    ${L?`<div class="last">지난번 ${md(L.d)} <b>${esc(L.kg)}</b> · ${L.n}세트. 목표 반복 상단 채웠으면 오늘 무게 올리기</div>`:''}
+    ${L?(()=>{const rc=recommend(k,i,e);return `<div class="last">지난번 ${md(L.d)} <b>${esc(L.kg)}</b> · ${L.n}세트${rc?` → 오늘 추천 <b>${esc(fmtWR(rc.w,rc.r))}</b><br>${esc(rc.why)}`:''}</div>`})():''}
     <div class="sets">${Array.from({length:e.s},(_,j)=>`<button type="button" class="s${st.sets[j]?' on':''}" data-j="${j}" aria-pressed="${!!st.sets[j]}" aria-label="${j+1}세트">${j+1}</button>`).join('')}
 </div>
     ${(()=>{const [w,r]=wr(k,i,e,st,L);return `<button type="button" class="wr" aria-label="${esc(e.n)} 무게와 횟수 바꾸기"><span class="wl">무게</span><b>${w?w+'<small>kg</small>':'맨몸'}</b><span class="wx">×</span><b>${r}<small>회</small></b><span class="wh">눌러서 변경</span></button>`})()}
@@ -390,7 +425,7 @@ function bindTrain(v){
     const mb=art.querySelector('.memob'),mi=art.querySelector('.memoin');mb.onclick=()=>{mi.hidden=!mi.hidden;if(!mi.hidden)mi.focus()};mi.oninput=()=>{const st=get();st.memo=mi.value;save();mb.classList.toggle('has',!!mi.value)};
     art.querySelector('.altb').onclick=()=>{const st=get();st.sw=!st.sw;if(!(st.sets||[]).some(Boolean))st.kg='';st.n=st.sw?DAYS[k].ex[i].alt:DAYS[k].ex[i].n;save();toast(st.sw?'대체 운동으로 바꿨어요':'원래 종목으로 돌렸어요');render(true)};
     art.querySelectorAll('button.s').forEach(b=>b.onclick=()=>{
-      const st=get(),j=+b.dataset.j;st.sets[j]=!st.sets[j];st.n=e.n;if(!st.kg){const [w,r]=wr(k,i,e,st,lastFor(k,i,e.n));st.kg=fmtWR(w,r)}save();
+      const st=get(),j=+b.dataset.j;log.cn=log.cn||{};if(log.cn[k]==null)log.cn[k]=cycle.n;st.sets[j]=!st.sets[j];st.n=e.n;if(!st.kg){const [w,r]=wr(k,i,e,st,lastFor(k,i,e.n));st.kg=fmtWR(w,r)}save();
       if(st.sets[j]){const n=setsDone(log,k,i);toast(n>=e.s?'+30 XP · 종목 클리어':'+10 XP');startTimer(restSec(e.rest),e.n)}
       render(true);const nb=document.querySelector(`.ex[data-k="${k}"][data-i="${i}"] button.s[data-j="${j}"]`);if(nb&&st.sets[j])nb.classList.add('pop')});
     art.querySelector('.wr').onclick=()=>{const st=get();const [w,r]=wr(k,i,e,st,lastFor(k,i,e.n));
@@ -400,15 +435,15 @@ function bindTrain(v){
     const keys=session,already=keys.every(k=>(log.done||{})[k]);
     const before=lvOf(totalXP());
     log.done=log.done||{};keys.forEach(k=>log.done[k]=true);delete log.pass;save();
-    if(!already)markDone(keys);
+    const wrapped=!already&&markDone(keys);
     const after=lvOf(totalXP());
-    showClear(keys,!already&&after>before?after:0);
+    showClear(keys,!already&&after>before?after:0,wrapped);
     render(true);
   };
 }
 
 /* ---------- clear overlay ---------- */
-function showClear(keys,lvUp){
+function showClear(keys,lvUp,wrapped){
   clearInterval(tInt);document.getElementById('timer').hidden=true;
   const its=items(keys),[dn,tt]=prog(log,its);let vol=0;
   its.forEach(({k,i})=>{const st=log[k]&&log[k][i];const p=st&&parseKg(st.kg);if(p)vol+=p[0]*p[1]*setsDone(log,k,i)});
@@ -416,6 +451,7 @@ function showClear(keys,lvUp){
   const o=document.getElementById('clear');o.hidden=false;
   o.innerHTML=`<canvas id="cf"></canvas><div class="box"><div class="badge"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
   <span class="eyebrow">${md(today)} · ${keys.map(k=>DAYS[k].tag).join(' + ')}</span><h1>Workout<br>Complete</h1><div class="sub">${sname(keys)} 완료. 오늘도 해냈어요. 다음은 ${DAYS[nextDay()].name}!</div>
+  ${wrapped?`<span class="lvup" style="background:var(--ok)">CYCLE ${cycle.n} 완주 · 다음 사이클은 부위마다 종목 ${SWAPS_PER_CYCLE}개가 새로 바뀌어요</span>`:''}
   ${lvUp?`<span class="lvup">LEVEL UP · LV ${lvUp}${TITLES.some(t=>t[0]===lvUp)?' · 새 칭호 '+titleOf(lvUp):''}</span>`:''}
   <div class="stats"><div class="t"><small>세트</small><b>${dn}/${tt}</b></div><div class="t"><small>총 볼륨</small><b>${vol?Math.round(vol).toLocaleString():'-'}</b>${vol?'<em>kg</em>':''}</div><div class="t"><small>획득</small><b>+${xp}</b><em>XP</em></div></div>
   <button class="btn gold" type="button" id="ccopy">${sentLabel()}</button><button class="btn ghost" type="button" id="cclose">닫기</button></div>`;
@@ -484,7 +520,7 @@ function renderLog(){
   <div class="stats"><div class="t"><small>운동한 날</small><b>${weekCount()}/${WEEK_GOAL}</b></div><div class="t"><small>평균 섭취</small><b>${kc.length?Math.round(avg(kc)).toLocaleString():'-'}</b>${kc.length?'<em>kcal</em>':''}</div><div class="t"><small>평균 체중</small><b>${ws.length?avg(ws).toFixed(1):'-'}</b>${ws.length?'<em>kg</em>':''}</div></div>
   <div class="panel"><h3>날짜별 기록</h3><p class="small" style="margin:0">누르면 그날 기록이 복사돼요. 트레이너나 Claude에게 보내서 피드백 받기.</p><div class="hist">
   ${ds.map(d=>{const lg=lgOf(d);const [k,p]=totals(lg);const dk=doneKeys(lg);const wk=dk.length?dk.map(x=>DAYS[x].name).join('+'):lg.cardio?`유산소 ${lg.cardio.t}`:lg.pass?'패스':(workoutKey(lg).map(x=>DAYS[x].name+' 진행').join('·')||'운동 기록 없음');return `<button type="button" class="hrow" data-d="${d}"><b>${md(d)}${d===today?'<br><small style="color:var(--gold)">오늘</small>':''}</b><span>${wk}</span><span class="w">+${xpOf(lg)}XP</span><span class="s2">${k?k.toLocaleString()+'kcal · '+p+'g':'식단 없음'}${(lg.info||{}).w?' · '+lg.info.w+'kg':''}</span></button>`}).join('')}</div></div>
-  <div class="panel"><h3>루틴 순서</h3>${cycleBar()}<ul class="plain"><li>요일 고정이 아니라 순서대로 돌아가요. 가슴 → 등 → 어깨 → 하체</li><li>3대 운동은 각 부위 날에: 벤치는 가슴, 데드는 등, 스쿼트는 하체</li><li>주 5번 운동이 목표. 나머지 2일은 쉬거나 수영</li><li>순서 건너뛰고 다른 부위 해도 OK. 안 한 부위가 다음 추천으로 남아요</li></ul>
+  <div class="panel"><h3>루틴 순서</h3>${cycleBar()}<ul class="plain"><li>요일 고정이 아니라 순서대로 돌아가요. 가슴 → 등 → 어깨 → 하체</li><li>3대 운동은 각 부위 날에: 벤치는 가슴, 데드는 등, 스쿼트는 하체</li><li>주 5번 운동이 목표. 나머지 2일은 쉬거나 수영</li><li>순서 건너뛰고 다른 부위 해도 OK. 안 한 부위가 다음 추천으로 남아요</li><li>한 바퀴 끝날 때마다 부위별 보조 종목 ${SWAPS_PER_CYCLE}개가 비슷한 종목으로 바뀌어요. 메인 운동은 그대로</li><li>지난 기록을 보고 오늘 무게를 추천해요: 모든 세트를 목표 횟수 상단까지 채우면 무게 올리기, 2번 연속 못 채우면 10% 낮추기</li></ul>
   <button class="btn ghost" type="button" id="reset" style="padding:10px;font-size:13px">순서 처음부터 다시 (가슴부터)</button></div>
   <div class="panel"><h3>규칙</h3><ul class="plain"><li>목표 반복 상단을 RIR 2로 채우면 상체 +1~2.5kg, 하체 +2.5~5kg</li><li>종목은 그대로 유지. 2주 정체 시 보조 종목만 교체</li><li>날카로운 통증·관절 통증·어지러움·가슴 통증·비정상적 호흡곤란이면 그날 운동 중단, 계속되면 병원</li></ul></div></div>`;
 }
@@ -493,7 +529,7 @@ function bindLog(v){
   v.querySelectorAll('.hrow').forEach(b=>b.onclick=()=>copyText(buildLog(b.dataset.d,lgOf(b.dataset.d))));
   const r=document.getElementById('reset');
   r.onclick=()=>{if(!resetArm){resetArm=true;r.textContent='한 번 더 누르면 초기화돼요';setTimeout(()=>{resetArm=false;if(r.isConnected)r.textContent='순서 처음부터 다시 (가슴부터)'},3000);return}
-    resetArm=false;cycle={done:[]};saveCycle();toast('순서를 가슴부터 다시 시작해요');render(true)};
+    resetArm=false;cycle.done=[];saveCycle();toast('순서를 가슴부터 다시 시작해요');render(true)};
 }
 
 /* ---------- SETTINGS (내 정보) ---------- */
