@@ -32,7 +32,7 @@ button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid
 .xp{flex:1;min-width:0}
 .xp-top{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-family:var(--hud);letter-spacing:.08em;text-transform:uppercase;font-weight:600}
 .xp-top b{color:var(--fg)}
-.sync{font-style:normal;letter-spacing:.02em;text-transform:none;margin-left:4px;font-family:var(--body);font-weight:500}
+.sync{white-space:nowrap;font-style:normal;letter-spacing:.02em;text-transform:none;margin-left:4px;font-family:var(--body);font-weight:500}
 .sync.cloud{color:var(--ok)}
 .sync.login,.sync.local{color:var(--sig)}
 .xpbar{height:2px;background:var(--line2);overflow:hidden;margin-top:9px}

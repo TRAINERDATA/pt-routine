@@ -61,10 +61,25 @@ async function flushSync(){
   catch(e){syncBusy=false;syncErr=e.message||String(e);syncState=e.auth?'auth':'wait';if(!e.auth)queueSync(30000)}
   renderHeader()}
 window.addEventListener('online',()=>queueSync(0));
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')queueSync(0)});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){queueSync(0);fetchCoach()}});
 /* profile: name, 1RM per main lift, daily targets. Lives only in this browser */
 const LIFTS=[['bench','벤치프레스'],['dead','데드리프트'],['squat','스쿼트'],['ohp','오버헤드프레스']];
 let PROF=store.get('pt-profile',null);
+/* weekly coaching the trainer pastes into the sheet's 코칭 tab (cached so it works offline) */
+let COACH=parseCoach(store.get('pt-coach',null));
+function parseCoach(c){if(!c||!c.week)return null;const L=s=>String(s||'').split(/\s*[;\n]\s*/).map(x=>x.trim()).filter(Boolean);
+  const w={};L(c.weights).forEach(x=>{const m=x.match(/^(.+?)\s*=\s*(.+)$/);if(!m)return;const v=parseKg(m[2])||bodyKg(m[2]);if(v)w[m[1].trim()]=v});
+  const sw={};L(c.swaps).forEach(x=>{const m=x.match(/^(.+?)\s*>\s*(.+)$/);if(m)sw[m[1].trim()]=m[2].trim()});
+  const rm={},K={'벤치':'bench','데드':'dead','스쿼트':'squat','ohp':'ohp'};String(c.rm||'').replace(/(벤치|데드|스쿼트|ohp)[^\d]*(\d+(?:\.\d+)?)/gi,(_,a,b)=>{rm[K[a.toLowerCase()]]=+b});
+  return Object.assign({},c,{w,sw,rmv:rm})}
+async function fetchCoach(){if(!syncOn())return;
+  try{const j=await syncPost({action:'coach',name:PROF.name,pin:PROF.pin});const c=j.coach||null;
+    if(JSON.stringify(c)===JSON.stringify(store.get('pt-coach',null)))return;
+    store.set('pt-coach',c);COACH=parseCoach(c);
+    /* 1RM update from the trainer: apply once per coaching week, then weights are recomputed on reload */
+    if(COACH&&Object.keys(COACH.rmv).length&&store.get('pt-coach-rm','')!==COACH.week){store.set('pt-coach-rm',COACH.week);
+      PROF=Object.assign({},PROF,{rm:Object.assign({},PROF.rm,COACH.rmv)});store.set('pt-profile',PROF);toast('트레이너가 1RM을 갱신했어요');setTimeout(()=>location.reload(),900);return}
+    applyCycle();render(true);if(COACH)toast('이번 주 코칭이 도착했어요')}catch(e){}}
 function prof(){return PROF||{name:'',rm:{},kcal:DEFAULT_TARGETS.kcal,prot:DEFAULT_TARGETS.prot}}
 function rnd(v,step){return Math.max(step,Math.round(v/step)*step)}
 function kgOf(w){const base=+((prof().rm||{})[w[0]]||0);if(!base)return '1RM 입력 필요';return w[2]==='db'?`한 손 ${rnd(base*w[1],2)}kg`:`${rnd(base*w[1],2.5)}kg`}
@@ -103,7 +118,12 @@ function plan(k,n){const id=k+n;if(planMemo[id])return planMemo[id];
 function applyCycle(){Object.keys(BASE).forEach(k=>{const n=cnFor(k),picks=plan(k,n);
   DAYS[k].tag=BASE[k].tag+' · CYCLE '+(n+1);
   DAYS[k].ex=BASE[k].ex.map((e,i)=>{let o;if(picks[i]!=null){const v=e.v[picks[i]];o=Object.assign({},e,v,{alt:e.n,isNew:1});if(!v.g)delete o.g;if(!v.w)delete o.w;if(v.w)delete o.kg}else o=Object.assign({},e);
-    delete o.v;if(o.w)o.kg=kgOf(o.w);return o})})}
+    delete o.v;
+    const to=COACH&&COACH.sw[o.n];if(to){const d=findEx(to);o=Object.assign({},o,{n:to,alt:o.n,coach:1,isNew:0});delete o.g;delete o.w;o.kg='무게 직접 설정';
+      if(d){if(d.w)o.w=d.w;else if(d.kg)o.kg=d.kg;if(d.r)o.r=d.r;if(d.g)o.g=d.g}}
+    if(o.w)o.kg=kgOf(o.w);return o})})}
+/* an exercise definition anywhere in the routine (main list or variant pools), by name */
+function findEx(name){for(const k in BASE)for(const e of BASE[k].ex){if(e.n===name)return e;for(const v of e.v||[])if(v.n===name)return v}return null}
 applyCycle();
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function col(k){return `var(${PLATE[k]||'--p-gray'})`}
@@ -165,7 +185,10 @@ function hist(name,max){const out=[];for(const d of allDates()){if(d===today)con
 function lastFor(k,i,name){return hist(name||DAYS[k].ex[i].n,1)[0]||null}
 function repRange(r){const m=String(r).match(/(\d+)\s*~\s*(\d+)/);if(m)return [+m[1],+m[2]];const s=String(r).match(/(\d+)/);return s?[+s[1],+s[1]]:[8,12]}
 /* double progression: fill every set at the top of the rep range -> add weight; miss sets twice in a row -> back off 10% */
-function recommend(k,i,e){const H=hist(e.n,2);if(!H.length)return null;const p=parseKg(H[0].kg)||bodyKg(H[0].kg);if(!p)return null;
+function recommend(k,i,e){const H=hist(e.n,2);
+  /* trainer's weight for this week wins until the member has trained that exercise since the week started */
+  const cw=COACH&&COACH.w[e.n];if(cw&&!(H[0]&&H[0].d>=COACH.week))return {w:cw[0],r:cw[1],why:'트레이너 지정 (이번 주 코칭)'};
+  if(!H.length)return null;const p=parseKg(H[0].kg)||bodyKg(H[0].kg);if(!p)return null;
   let [w,r]=p;const [lo,hi]=repRange(e.r),full=H[0].n>=e.s,db=/^한 손/.test(e.kg)||(e.w&&e.w[2]==='db');
   if(full&&r>=hi){if(!w)return {w,r:r+1,why:'목표 횟수 다 채움 → 1회 더'};
     const inc=db?2:(k==='LG'||/데드/.test(e.n))&&w>=60?5:2.5;return {w:+(w+inc).toFixed(1),r:lo,why:`목표 횟수 다 채움 → +${inc}kg`}}
@@ -204,7 +227,7 @@ function startTimer(sec,label){
 function renderHeader(){
   const x=totalXP(),lv=lvOf(x),inLv=x%XP_LV;
   document.getElementById('hdr').innerHTML=`<div class="lv"><span><small>LV</small><b>${lv}</b></span></div>
-  <div class="xp"><div class="xp-top"><span>${now.getMonth()+1}/${now.getDate()} (${WEEKDAY[now.getDay()]}) ${PROF&&PROF.name?`<em class="sync">· ${esc(PROF.name)}</em>`:''}${syncOn()?`<em class="sync ${syncState==='ok'?'cloud':'local'}">${{ok:'● 시트 저장됨',busy:'● 저장 중',wait:'● 저장 대기',auth:'● PIN 확인'}[syncState]||'● 시트 연결'}</em>`:''}</span><span><b>${inLv}</b> / ${XP_LV} XP</span></div><div class="xpbar"><i style="width:${inLv/XP_LV*100}%"></i></div></div>
+  <div class="xp"><div class="xp-top"><span>${now.getMonth()+1}/${now.getDate()} (${WEEKDAY[now.getDay()]}) ${PROF&&PROF.name?`<em class="sync">· ${esc(PROF.name)}</em>`:''}${syncOn()?`<em class="sync ${syncState==='ok'?'cloud':'local'}">${{ok:'● 저장됨',busy:'● 저장 중',wait:'● 대기',auth:'● PIN 확인'}[syncState]||'● 연결 중'}</em>`:''}</span><span><b>${inLv}</b> / ${XP_LV} XP</span></div><div class="xpbar"><i style="width:${inLv/XP_LV*100}%"></i></div></div>
   <div class="streak"><b>${weekCount()}/${WEEK_GOAL}</b>이번 주</div>${SYNC_URL&&PROF&&!PROF.pin?`<div class="offwarn">내 정보에서 PIN을 정하면 기록이 팀 시트에 자동 저장돼요</div>`:syncState==='auth'?`<div class="offwarn">시트 저장 안 됨: ${/PIN이 맞지/.test(syncErr)?'이 이름이 다른 PIN으로 이미 등록돼 있어요. 내 정보에서 PIN을 확인하거나, 다른 사람이면 이름을 바꿔 주세요 (예: 김민수)':esc(syncErr)}</div>`:syncState==='wait'?`<div class="offwarn">인터넷이 연결되면 자동으로 저장돼요. 기록은 폰에 안전하게 있어요</div>`:''}`;
 }
 const ICONS={
@@ -355,6 +378,14 @@ function buddyCard(){
   <div class="bxp"><i style="width:${(x%XP_LV)/XP_LV*100}%"></i></div>
   <p class="small">${nt?`LV ${nt[0]}부터 <b>${nt[1]}</b>. 레벨이 오를수록 몸이 커져요`:'최고 칭호 달성'}${trained?' · 오늘 운동 완료 💪':''}</p></div></section>`;
 }
+function coachCard(){const c=COACH;if(!c)return '';const sp=s=>String(s||'').split(/\s+\/\s+/).filter(Boolean);
+  const W=Object.entries(c.w).map(([n,v])=>`${esc(n)} <b>${esc(fmtWR(v[0],v[1]))}</b>`),S=Object.entries(c.sw).map(([a,b])=>`${esc(a)} → <b>${esc(b)}</b>`);
+  return `<div class="panel fb"><div class="row"><h3>이번 주 코칭</h3><span class="sp"></span><span class="small">${md(c.week)} 주</span></div>
+  ${c.comment?`<div class="fbh"><p>${esc(c.comment)}</p></div>`:''}
+  ${sp(c.good).length?`<div class="fbs"><small>잘한 점</small><ul>${sp(c.good).map(x=>`<li class="ok">${esc(x)}</li>`).join('')}</ul></div>`:''}
+  ${sp(c.fix).length?`<div class="fbs fix"><small>고칠 점</small><ul>${sp(c.fix).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}
+  ${sp(c.goal).length?`<div class="fbs"><small>다음 주 목표</small><ul>${sp(c.goal).map(x=>`<li>👉 ${esc(x)}</li>`).join('')}</ul></div>`:''}
+  ${W.length||S.length?`<div class="fbs"><small>루틴 조정 (운동 화면에 자동 반영)</small><ul>${W.map(x=>`<li>${x}</li>`).join('')}${S.map(x=>`<li>${x}</li>`).join('')}</ul></div>`:''}</div>`}
 function renderHome(){
   const dk=doneKeys(log); let hero;
   if(dk.length){
@@ -391,7 +422,7 @@ function renderHome(){
   Q.push(['아침 공복 체중',20,!!info.w,'food']);
   Q.push(['걸음 8,000보',50,+info.steps>=8000,'food']);
   const doneN=Q.filter(q=>q[2]).length;
-  return `<div class="sec">${buddyCard()}${PROF&&LIFTS.some(([k])=>+(PROF.rm||{})[k])?'':`<button type="button" class="fbt" data-go="set"><span class="grade" style="width:34px;height:34px;font-size:18px">!</span><span><small>시작 무게 계산</small>내 정보에서 1RM을 입력하면 종목별 무게가 나와요</span><b>›</b></button>`}${hero}
+  return `<div class="sec">${buddyCard()}${coachCard()}${PROF&&LIFTS.some(([k])=>+(PROF.rm||{})[k])?'':`<button type="button" class="fbt" data-go="set"><span class="grade" style="width:34px;height:34px;font-size:18px">!</span><span><small>시작 무게 계산</small>내 정보에서 1RM을 입력하면 종목별 무게가 나와요</span><b>›</b></button>`}${hero}
   <div class="panel"><div class="row"><h3>루틴 순서 · 사이클 ${cycle.n+1}</h3><span class="sp"></span><span class="small">한 바퀴 돌면 종목 일부 교체</span></div>${cycleBar()}${newList()}</div>
   <div class="week">${wk}</div>
   <div class="panel"><div class="row"><h3>일일 퀘스트</h3><span class="sp"></span><span class="small">${doneN} / ${Q.length}</span></div>
@@ -436,9 +467,9 @@ function renderTrain(){
   its.forEach(({k,i,e},n)=>{
     const st=(log[k]&&log[k][i])||{sets:[],kg:''},sd=setsDone(log,k,i);e=effEx(k,i,e,st);const L=lastFor(k,i,e.n);
     html+=`<article class="ex${sd>=e.s?' complete':''}" data-k="${k}" data-i="${i}" style="--c:${col(k)}">
-    <div class="top"><span class="num">${sd>=e.s?'✓':n+1}</span><div style="min-width:0"><h3>${esc(e.n)}</h3>${keys.length>1?`<span class="why">${DAYS[k].name}</span> `:''}${e.isNew&&!st.sw?`<span class="why" style="color:var(--ok)">NEW · 이번 사이클 </span>`:''}${e.why?`<span class="why">${esc(e.why)}</span>`:''}</div><span class="kg">${esc(e.kg)}<small>시작 무게</small></span></div>
+    <div class="top"><span class="num">${sd>=e.s?'✓':n+1}</span><div style="min-width:0"><h3>${esc(e.n)}</h3>${keys.length>1?`<span class="why">${DAYS[k].name}</span> `:''}${e.isNew&&!st.sw?`<span class="why" style="color:var(--ok)">NEW · 이번 사이클 </span>`:''}${e.coach&&!st.sw?`<span class="why" style="color:var(--ok)">트레이너 교체 </span>`:''}${e.why?`<span class="why">${esc(e.why)}</span>`:''}</div><span class="kg">${esc(e.kg)}<small>시작 무게</small></span></div>
     <div class="meta"><span><b>${e.s}×${esc(e.r)}</b></span><span>RIR <b>${esc(e.rir)}</b></span><span>휴식 <b>${esc(e.rest)}</b></span></div>
-    ${L?(()=>{const rc=recommend(k,i,e);return `<div class="last">지난번 ${md(L.d)} <b>${esc(L.kg)}</b> · ${L.n}세트${rc?` → 오늘 추천 <b>${esc(fmtWR(rc.w,rc.r))}</b><br>${esc(rc.why)}`:''}</div>`})():''}
+    ${(()=>{const rc=recommend(k,i,e);if(!L&&!rc)return '';return `<div class="last">${L?`지난번 ${md(L.d)} <b>${esc(L.kg)}</b> · ${L.n}세트`:''}${rc?`${L?' → ':''}오늘 추천 <b>${esc(fmtWR(rc.w,rc.r))}</b><br>${esc(rc.why)}`:''}</div>`})()}
     <div class="sets">${Array.from({length:e.s},(_,j)=>`<button type="button" class="s${st.sets[j]?' on':''}" data-j="${j}" aria-pressed="${!!st.sets[j]}" aria-label="${j+1}세트">${j+1}</button>`).join('')}
 </div>
     ${(()=>{const [w,r]=wr(k,i,e,st,L);return `<button type="button" class="wr" aria-label="${esc(e.n)} 무게와 횟수 바꾸기"><span class="wl">무게</span><b>${w?w+'<small>kg</small>':'맨몸'}</b><span class="wx">×</span><b>${r}<small>회</small></b><span class="wh">눌러서 변경</span></button>`})()}
@@ -638,4 +669,4 @@ function render(keepScroll){
 }
 if(!PROF)view='set';
 render();
-queueSync(0);
+queueSync(0);fetchCoach();
