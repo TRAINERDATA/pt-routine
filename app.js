@@ -49,7 +49,7 @@ async function syncFallback(body){
 let jsonpN=0;
 function jsonp(body){return new Promise((ok,bad)=>{const cb='__ptcb'+(++jsonpN)+'_'+Date.now(),sc=document.createElement('script');
   const done=()=>{clearTimeout(t);delete window[cb];sc.remove()},t=setTimeout(()=>{done();bad(new Error('응답 없음'))},15000);
-  window[cb]=j=>{done();ok(j)};sc.onerror=()=>{done();bad(new Error('연결 실패'))};
+  window[cb]=j=>{done();ok(j)};sc.onerror=()=>{done();bad(new Error('시트에 연결 못 했어요. 시트 코드가 예전 버전이거나 새 버전 배포가 안 된 것 같아요'))};
   /* the script ran but never called back: the deployed Apps Script predates JSONP support */
   sc.onload=()=>setTimeout(()=>{if(window[cb]){done();bad(new Error('시트 코드가 예전 버전이에요'))}},50);
   sc.src=SYNC_URL+'?cb='+cb+'&p='+encodeURIComponent(JSON.stringify(body));document.head.appendChild(sc)})}
