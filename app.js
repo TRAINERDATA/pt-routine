@@ -652,6 +652,22 @@ function bindLog(v){
     resetArm=false;cycle.done=[];saveCycle();toast('순서를 가슴부터 다시 시작해요');render(true)};
 }
 
+/* ---------- 1RM dial ---------- */
+const RM_LIST=[0,...Array.from({length:113},(_,i)=>20+i*2.5)],RM_DEF={bench:60,dead:100,squat:80,ohp:40};
+function rmBtn(k,n,v){v=+v||0;return `<button type="button" class="wr" data-rm="${k}" data-v="${v||''}"><span class="wl">${n}</span><b>${v?v+'<small>kg</small>':'<small style="margin:0">모름</small>'}</b><span class="wh">눌러서 변경</span></button>`}
+function bindRm(){document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{const k=b.dataset.rm,n=LIFTS.find(x=>x[0]===k)[1];
+  openPicker(n+' 1RM',RM_LIST,+b.dataset.v||RM_DEF[k],x=>x?x+'<small>kg</small>':'모름',v=>{b.outerHTML=rmBtn(k,n,v);bindRm()})})}
+/* one-column version of the weight/reps wheel sheet */
+function openPicker(title,list,val,fmt,done){
+  const sh=document.getElementById('sheet');let idx=list.findIndex(x=>x>=val);if(idx<0)idx=list.length-1;
+  sh.innerHTML=`<div class="sbg"></div><div class="spanel" role="dialog" aria-label="${esc(title)}"><div class="shd"><button type="button" class="sx">취소</button><span>${esc(title)}</span><button type="button" class="sok">완료</button></div><div class="wheels one"><div class="wband"></div><div class="wcol"><div class="wscroll">${list.map(x=>`<div class="wi">${fmt(x)}</div>`).join('')}</div></div></div></div>`;
+  sh.hidden=false;const c=sh.querySelector('.wscroll');let sel=idx;
+  const mark=()=>{sel=Math.min(list.length-1,Math.max(0,Math.round(c.scrollTop/IH)));c.querySelectorAll('.wi').forEach((el,q)=>el.classList.toggle('on',q===sel))};
+  c.scrollTop=idx*IH;mark();c.addEventListener('scroll',mark,{passive:true});
+  c.querySelectorAll('.wi').forEach((el,q)=>el.onclick=()=>c.scrollTo({top:q*IH,behavior:'smooth'}));
+  const close=()=>{sh.hidden=true;sh.innerHTML=''};sh.querySelector('.sbg').onclick=close;sh.querySelector('.sx').onclick=close;
+  sh.querySelector('.sok').onclick=()=>{done(list[sel]);close()}}
+
 /* ---------- character creator ---------- */
 let draftLook=null,previewLv=1;
 const GROW=[1,10,20,30];
@@ -683,18 +699,18 @@ function bindLook(){const box=document.querySelector('.lk');if(!box)return;
 function renderSet(){
   const p=prof(),first=!PROF;if(!draftLook)draftLook=lookOf(p.look);
   return `<div class="sec"><div><span class="eyebrow">${first?'Welcome':'Profile'}</span><h2 style="font-size:28px">${first?'처음 오셨네요':'내 정보'}</h2></div>
-  ${first?lookEditor():''}
   ${first?`<p class="small" style="margin:0">이름과 1RM만 넣으면 종목별 시작 무게가 자동으로 계산돼요.${SYNC_URL?' 기록은 팀 시트에 자동 저장돼서 폰을 바꿔도 이름과 PIN으로 다시 불러올 수 있어요.':' 기록은 이 브라우저에만 저장돼요.'}</p>`:''}
-  ${first&&SYNC_URL?`<div class="panel"><h3>이미 쓰던 기록이 있어요</h3><p class="small" style="margin:0">다른 폰이나 PC에서 쓰던 이름과 PIN을 넣으면 기록을 그대로 불러와요.</p>
-  <div class="fields"><label for="r-name"><span>이름</span><input id="r-name" placeholder="예: 민수"></label><label for="r-pin"><span>PIN</span><input id="r-pin" inputmode="numeric" type="password" placeholder="숫자 4~8자리"></label></div>
-  <button class="btn ghost" type="button" id="rload">기록 불러오기</button></div>`:''}
   <div class="panel"><h3>이름${SYNC_URL?' · PIN':''}</h3><div class="fields"${SYNC_URL?'':' style="grid-template-columns:1fr"'}><label for="s-name"><span>표시 이름</span><input id="s-name" placeholder="예: 민수" value="${esc(p.name||'')}"></label>${SYNC_URL?`<label for="s-pin"><span>PIN (숫자 4~8자리)</span><input id="s-pin" inputmode="numeric" type="password" placeholder="예: 1234" value="${esc(p.pin||'')}"></label>`:''}</div>
   ${SYNC_URL?'<p class="small" style="margin:0">이름과 PIN으로 팀 시트에 저장돼요. 다른 기기에서 기록을 불러올 때 필요하니 꼭 기억해 두세요. 이름이 다른 팀원과 겹치면 성까지 넣어주세요.</p>':''}</div>
-  <div class="panel"><h3>1RM (1회 최대 무게)</h3><p class="small" style="margin:0">모르면 5회 겨우 드는 무게 × 1.15 정도로 넣으세요. 비워두면 그 부위 무게는 안 나와요.</p>
-  <div class="fields">${LIFTS.map(([k,n])=>`<label for="s-${k}"><span>${n} (kg)</span><input id="s-${k}" inputmode="decimal" placeholder="예: 100" value="${esc((p.rm||{})[k]||'')}"></label>`).join('')}</div></div>
+  ${first?lookEditor():''}
+  <div class="panel"><h3>1RM (1회 최대 무게)</h3><p class="small" style="margin:0">눌러서 다이얼을 돌려 고르세요. 모르면 5회 겨우 드는 무게 × 1.15 정도로. "모름"으로 두면 그 부위 무게는 안 나와요.</p>
+  <div class="rms">${LIFTS.map(([k,n])=>rmBtn(k,n,(p.rm||{})[k])).join('')}</div></div>
   <div class="panel"><h3>하루 목표</h3><div class="fields"><label for="s-kcal"><span>칼로리 (kcal)</span><input id="s-kcal" inputmode="numeric" value="${esc(p.kcal)}"></label><label for="s-prot"><span>단백질 (g)</span><input id="s-prot" inputmode="numeric" value="${esc(p.prot)}"></label></div></div>
   ${first?'':lookEditor()}
   <button class="btn gold" type="button" id="ssave">${first?'이 캐릭터로 시작하기':'저장'}</button>
+  ${first&&SYNC_URL?`<div class="panel" style="margin-top:10px"><h3>이미 쓰던 기록이 있어요</h3><p class="small" style="margin:0">다른 폰이나 PC에서 쓰던 이름과 PIN을 넣으면 기록을 그대로 불러와요.</p>
+  <div class="fields"><label for="r-name"><span>이름</span><input id="r-name" placeholder="예: 민수"></label><label for="r-pin"><span>PIN</span><input id="r-pin" inputmode="numeric" type="password" placeholder="숫자 4~8자리"></label></div>
+  <button class="btn ghost" type="button" id="rload">기록 불러오기</button></div>`:''}
   ${first?'':`<div class="panel"><h3>백업 · 기기 옮기기</h3><p class="small" style="margin:0">${SYNC_URL?'기록은 팀 시트에도 자동 저장돼요. 새 기기에서는 처음 화면의 "기록 불러오기"를 쓰면 돼요. 백업 파일은 혹시 몰라 따로 보관하고 싶을 때 쓰세요.':'기록은 이 브라우저에만 있어요. 폰을 바꾸거나 브라우저 데이터를 지우기 전에 백업 파일을 받아두세요.'}</p>
   <div class="row" style="gap:8px"><button class="btn ghost" type="button" id="sexp">백업 받기</button><button class="btn ghost" type="button" id="simp">백업 불러오기</button></div><input type="file" id="sfile" accept="application/json,.json" hidden></div>
   <button class="btn ghost" type="button" id="swipe" style="padding:10px;font-size:13px">이 기기의 내 기록 전부 지우기</button>`}</div>`;
@@ -702,8 +718,9 @@ function renderSet(){
 let wipeArm=false;
 function bindSet(){
   const $=id=>document.getElementById(id);bindLook();
+  bindRm();
   $('ssave').onclick=()=>{const num=v=>{const n=parseFloat(String(v).replace(',','.'));return n>0?n:''};
-    const rm={};LIFTS.forEach(([k])=>rm[k]=num($('s-'+k).value));
+    const rm={};LIFTS.forEach(([k])=>rm[k]=num(document.querySelector(`[data-rm="${k}"]`).dataset.v));
     const name=$('s-name').value.trim(),pin=$('s-pin')?$('s-pin').value.trim():'';
     if(!name){toast('이름을 넣어 주세요');return}
     if(SYNC_URL&&!/^\d{4,8}$/.test(pin)){toast('PIN은 숫자 4~8자리로 정해 주세요');return}
