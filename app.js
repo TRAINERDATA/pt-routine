@@ -4,9 +4,9 @@ function workoutKey(lg){const ks=Object.keys(DAYS).filter(k=>lg[k]&&Object.value
 function buildLog(date,lg){
   const info=lg.info||{}; const [k,p]=totals(lg);
   const wk=[...new Set([...workoutKey(lg),...Object.keys(lg.done||{}).filter(k=>lg.done[k]&&DAYS[k])])];
-  const wlines=wk.length?wk.map(key=>{const d=DAYS[key];return `${d.name}\n`+d.ex.map((e,i)=>{const st=(lg[key]&&lg[key][i])||{sets:[],kg:''};const n=(st.sets||[]).filter(Boolean).length;return n||st.kg||st.memo?`  ${st.n||e.n}: ${st.kg||'?'} / ${n}세트${st.memo?' / 메모: '+st.memo:''}`:null}).filter(Boolean).join('\n')}).join('\n'):(lg.cardio?`유산소로 대체 (${lg.cardio.t} ${lg.cardio.min||'?'}분)`:lg.pass?'패스 (휴식)':'기록 없음');
+  const wlines=wk.length?wk.map(key=>{const d=DAYS[key];return `${d.name}\n`+d.ex.map((e,i)=>{const st=(lg[key]&&lg[key][i])||{sets:[],kg:''};const n=(st.sets||[]).filter(Boolean).length;return n||st.kg||st.memo?`  ${st.n||e.n}: ${st.kg||'?'} / ${n}세트${st.memo?' / 메모: '+st.memo:''}`:null}).filter(Boolean).join('\n')}).join('\n'):(lg.cardio?`유산소로 대체 (${lg.cardio.t} ${cardioTxt(lg.cardio)})`:lg.pass?'패스 (휴식)':'기록 없음');
   const meal=MEALS.filter(m=>m.id).map(m=>{const j=(lg.meals||{})[m.id];const memo=(lg.memo||{})[m.id];const pick=j!==undefined&&m.o[j]?`${m.o[j][0]}${m.o[j][1]?': '+m.o[j][1]:''}`:'선택 안 함';return `  ${m.t.replace(/^[①②③]\s*/,'')}: ${pick}${memo?' / '+memo:''}`}).join('\n');
-  const extra=wk.length&&lg.cardio?`\n  + 유산소 ${lg.cardio.t} ${lg.cardio.min||'?'}분`:'';
+  const extra=wk.length&&lg.cardio?`\n  + 유산소 ${lg.cardio.t} ${cardioTxt(lg.cardio)}`:'';
   const etc=MEALS.some(m=>m.id&&(lg.meals||{})[m.id]!==undefined&&m.o[(lg.meals||{})[m.id]]&&m.o[(lg.meals||{})[m.id]][0]==='기타 (메모대로)');
   return `[오늘 기록]\n- 날짜: ${date}\n- 체중(아침 공복): ${info.w||''}\n- 운동: ${wlines}${extra}\n  체감 RIR:\n- 식단 (버튼 기준 약 ${k.toLocaleString()}kcal · 단백질 ${p}g${etc?', 기타 끼니는 메모로 따로 계산':''})\n${meal}\n- 걸음 수: ${info.steps||''}\n- 수면 시간: ${info.sleep||''}\n- 컨디션(1~10) / 통증 여부: ${info.cond||''} / ${info.pain||''}`;
 }
@@ -15,7 +15,9 @@ const PLATE = {CH:'--p-red',BK:'--p-blue',SH:'--p-yellow',LG:'--p-green'};
 const ORDER = ['CH','BK','SH','LG'];
 const WEEKDAY = ['일','월','화','수','목','금','토'];
 const XP_LV = 600;
-const CARDIO = ['수영','러닝','사이클','인클라인 걷기','기타'];
+const CARDIO = ['수영','러닝','사이클','기타'];
+/* running is logged by distance, everything else by minutes */
+function cardioTxt(c){return c.t==='러닝'?`${c.km||'?'}km`:`${c.min||'?'}분`}
 
 function ymd(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
 const now = new Date(); const today = ymd(now);
@@ -57,7 +59,7 @@ function sheetRow(lg){
   Object.keys(BASE).forEach(k=>Object.entries(lg[k]||{}).forEach(([i,st])=>{const n=(st.sets||[]).filter(Boolean).length;sets+=n;
     if(n||st.kg||st.memo)det.push(`${st.n||(BASE[k].ex[i]||{}).n} ${st.kg||'?'} ${n}세트${st.memo?' ('+st.memo+')':''}`)}));
   const dk=doneKeys(lg);if(dk.length)parts.push(dk.map(x=>DAYS[x].name).join('+'));else if(workoutKey(lg).length)parts.push(workoutKey(lg).map(x=>DAYS[x].name+' 진행').join('+'));
-  if(lg.cardio)parts.push(`유산소 ${lg.cardio.t} ${lg.cardio.min||'?'}분`);if(lg.pass&&!parts.length)parts.push('휴식');
+  if(lg.cardio)parts.push(`유산소 ${lg.cardio.t} ${cardioTxt(lg.cardio)}`);if(lg.pass&&!parts.length)parts.push('휴식');
   const [kc,pr]=totals(lg),info=lg.info||{};
   const meal=MEALS.filter(m=>m.id).map(m=>{const j=(lg.meals||{})[m.id],memo=(lg.memo||{})[m.id];const pick=j!=null&&m.o[j]?m.o[j][0]:'';return pick||memo?`${m.t.replace(/^[①②③]\s*/,'').split(' ')[0]}: ${pick}${memo?' / '+memo:''}`:''}).filter(Boolean).join(' · ');
   return [parts.join(' + '),sets||'',det.join(', '),kc||'',pr||'',info.w||'',info.steps||'',info.sleep||'',info.cond||'',info.pain||'',meal]}
@@ -436,10 +438,10 @@ function renderHome(){
   const dk=doneKeys(log); let hero;
   if(dk.length){
     const its=items(dk),[dn,tt]=prog(log,its);
-    hero=`<section class="hero" style="--c:${col(dk[0])}"><div class="row"><div style="flex:1;min-width:0"><span class="tag">Complete</span><h2>${sname(dk)}</h2><p>오늘 운동 끝. 식단 퀘스트만 챙기면 완벽해요.${log.cardio?` 유산소 ${esc(log.cardio.t)} ${esc(log.cardio.min||'')}분도 했어요.`:''}</p></div>${ring(1,'✓')}</div>
+    hero=`<section class="hero" style="--c:${col(dk[0])}"><div class="row"><div style="flex:1;min-width:0"><span class="tag">Complete</span><h2>${sname(dk)}</h2><p>오늘 운동 끝. 식단 퀘스트만 챙기면 완벽해요.${log.cardio?` 유산소 ${esc(log.cardio.t)} ${esc(cardioTxt(log.cardio))}도 했어요.`:''}</p></div>${ring(1,'✓')}</div>
     <div class="row" style="gap:8px"><button class="btn done" type="button" id="hclear">결과 보기</button><button class="btn ghost" type="button" id="hcardio2">${log.cardio?'유산소 수정':'+ 유산소 추가'}</button></div></section>`;
   } else if(log.cardio){
-    hero=`<section class="hero" style="--c:var(--p-blue)"><span class="tag">CARDIO DAY</span><h2>유산소로 대체</h2><p>${esc(log.cardio.t)} ${esc(log.cardio.min||'?')}분 완료. 근력 순서는 그대로라 다음엔 <b>${DAYS[nextDay()].name}</b> 차례예요.</p>
+    hero=`<section class="hero" style="--c:var(--p-blue)"><span class="tag">CARDIO DAY</span><h2>유산소로 대체</h2><p>${esc(log.cardio.t)} ${esc(cardioTxt(log.cardio))} 완료. 근력 순서는 그대로라 다음엔 <b>${DAYS[nextDay()].name}</b> 차례예요.</p>
     <div class="row" style="gap:8px"><button class="btn ghost" type="button" id="hundo">취소</button><button class="btn gold" type="button" id="hstart">그래도 ${DAYS[nextDay()].name} 하기</button></div></section>`;
   } else if(log.pass){
     hero=`<section class="hero" style="--c:var(--p-gray)"><span class="tag">REST DAY</span><h2>오늘은 패스</h2><p>쉬는 것도 루틴이에요. 순서는 밀리지 않고 다음에 <b>${DAYS[nextDay()].name}</b>부터 이어서 해요. 식단 퀘스트는 그대로!</p>
@@ -476,7 +478,7 @@ function renderHome(){
   <button class="btn ghost" type="button" id="hcopy">${sentLabel()}</button></div>`;
 }
 function cardioForm(){const c=log.cardio||{};return `<div class="cform"><div class="ctypes">${CARDIO.map(t=>`<button type="button" class="ct${(c.t||'수영')===t?' on':''}" data-t="${t}">${t}</button>`).join('')}</div>
-  <div class="row"><input id="cmin" inputmode="numeric" placeholder="분" value="${esc(c.min||'40')}" aria-label="유산소 시간(분)"><span class="small">분</span><span class="sp"></span><button class="btn gold" type="button" id="csave" style="width:auto;padding:12px 18px">기록 +100XP</button></div></div>`}
+  <div class="row"><input id="cmin" inputmode="${(c.t||'수영')==='러닝'?'decimal':'numeric'}" value="${esc((c.t||'수영')==='러닝'?(c.km||'5'):(c.min||'40'))}" aria-label="유산소 기록"><span class="small" id="cunit">${(c.t||'수영')==='러닝'?'km':'분'}</span><span class="sp"></span><button class="btn gold" type="button" id="csave" style="width:auto;padding:12px 18px">기록 +100XP</button></div></div>`}
 function bindHome(v){
   const bd=document.getElementById('buddy');if(bd)bd.onclick=()=>{const x=totalXP(),lv=lvOf(x);poseI=poseI==null?1:(poseI+1)%POSES.length;bd.innerHTML=charSVG(Math.min(1,(lv-1)/29),poseI,prof().look)+`<span class="pose">${POSES[poseI].n}</span>`;bd.firstChild.classList.add('pop2')};
   const $=id=>document.getElementById(id);
@@ -490,8 +492,9 @@ function bindHome(v){
   if($('hundo'))$('hundo').onclick=()=>{delete log.pass;delete log.cardio;save();render(true)};
   if($('hclear'))$('hclear').onclick=()=>showClear(doneKeys(log),0);
   let ct=(log.cardio||{}).t||'수영';
-  v.querySelectorAll('.ct').forEach(b=>b.onclick=()=>{ct=b.dataset.t;v.querySelectorAll('.ct').forEach(x=>x.classList.toggle('on',x===b))});
-  if($('csave'))$('csave').onclick=()=>{const had=!!log.cardio;log.cardio={t:ct,min:$('cmin').value};delete log.pass;save();homeMode='';if(!had)toast('+100 XP · 유산소 완료');render(true)};
+  v.querySelectorAll('.ct').forEach(b=>b.onclick=()=>{const was=ct==='러닝';ct=b.dataset.t;v.querySelectorAll('.ct').forEach(x=>x.classList.toggle('on',x===b));
+    const run=ct==='러닝',i=$('cmin');if(run!==was){$('cunit').textContent=run?'km':'분';i.inputMode=run?'decimal':'numeric';i.value=run?((log.cardio||{}).km||'5'):((log.cardio||{}).min||'40')}});
+  if($('csave'))$('csave').onclick=()=>{const had=!!log.cardio,val=$('cmin').value.trim();log.cardio=ct==='러닝'?{t:ct,km:val}:{t:ct,min:val};delete log.pass;save();homeMode='';if(!had)toast('+100 XP · 유산소 완료');render(true)};
   v.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
   $('hcopy').onclick=()=>finishDay();
 }
@@ -612,22 +615,30 @@ function bindFood(v){
 /* weekly report: charts come from the logs themselves, the written verdict from db doc pt/wk-<sunday> */
 function wkSeries(){const ds=allDates().filter(d=>d<=today).sort().slice(-28);
   const w=ds.map(d=>{const v=+((lgOf(d).info||{}).w||0);return v?{d,v}:null}).filter(Boolean);
-  const k=ds.slice(-7).map(d=>{const v=totals(lgOf(d))[0];return v?{d,v,t:+prof().kcal}:null}).filter(Boolean);
+  const k=ds.slice(-7).map(d=>{const lg=lgOf(d),v=totals(lg)[0],vol=volOf(lg);return v||vol?{d,v,t:+prof().kcal,vol}:null}).filter(Boolean);
   const L=[['CH',0,'벤치'],['BK',0,'데드'],['LG',0,'스쿼트'],['SH',0,'OHP']].map(([k2,i,n])=>{const pts=ds.map(d=>{const st=(lgOf(d)[k2]||{})[i];const m=st&&String(st.kg||'').match(/^(\d+(?:\.\d+)?)/);return m?{d,v:+m[1]}:null}).filter(Boolean);return {n,pts}});
   return {w,k,L}}
+/* total weight lifted that day: weight x reps x checked sets */
+function volOf(lg){let t=0;Object.keys(BASE).forEach(k=>Object.values(lg[k]||{}).forEach(st=>{const p=parseKg(st&&st.kg);if(p)t+=p[0]*p[1]*(st.sets||[]).filter(Boolean).length}));return t}
 function lineSVG(pts,unit){if(pts.length<2)return `<p class="small" style="margin:0">${pts.length?pts[0].v+unit+' (기록이 2일 이상 쌓이면 그래프가 그려져요)':'기록 없음'}</p>`;
   const W=320,H=120,px=28,py=16,vs=pts.map(p=>p.v),lo=Math.min(...vs)-.5,hi=Math.max(...vs)+.5;
   const x=i=>px+(W-px*2)*i/(pts.length-1),y=v=>py+(H-py*2)*(1-(v-lo)/(hi-lo||1));
   const path=pts.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(p.v).toFixed(1)).join(' ');
   return `<svg class="wkc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="var(--sig)" stroke-width="2.2" stroke-linejoin="round"/>${pts.map((p,i)=>{const lab=pts.length<=8||i===0||i===pts.length-1||i%Math.ceil(pts.length/5)===0&&pts.length-1-i>=Math.ceil(pts.length/10);return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="${pts.length>14?2.2:3.2}" fill="var(--bg)" stroke="var(--sig)" stroke-width="2"/>${lab?`<text x="${x(i).toFixed(1)}" y="${(y(p.v)-7).toFixed(1)}" text-anchor="middle">${p.v}</text><text x="${x(i).toFixed(1)}" y="${H-2}" text-anchor="middle" class="d">${md(p.d)}</text>`:''}`}).join('')}</svg>`}
-function barSVG(pts){if(!pts.length)return '<p class="small" style="margin:0">식단을 기록하면 그려져요</p>';
-  const W=320,H=120,px=14,py=16,mx=Math.max(...pts.map(p=>Math.max(p.v,p.t)))*1.1,bw=(W-px*2)/pts.length;
-  const y=v=>py+(H-py*2)*(1-v/mx),t=pts[0].t;
-  return `<svg class="wkc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="${px}" x2="${W-px}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}" stroke="var(--ok)" stroke-dasharray="4 4"/>${pts.map((p,i)=>`<rect x="${(px+bw*i+bw*.2).toFixed(1)}" y="${y(p.v).toFixed(1)}" width="${(bw*.6).toFixed(1)}" height="${(H-py-y(p.v)).toFixed(1)}" rx="2" fill="${p.v>p.t*1.1?'var(--sig)':'var(--ok)'}"/><text x="${(px+bw*i+bw/2).toFixed(1)}" y="${(y(p.v)-4).toFixed(1)}" text-anchor="middle">${(p.v/1000).toFixed(1)}k</text><text x="${(px+bw*i+bw/2).toFixed(1)}" y="${H-2}" text-anchor="middle" class="d">${md(p.d)}</text>`).join('')}</svg>`}
+function barSVG(pts){if(!pts.length)return '<p class="small" style="margin:0">식단이나 운동을 기록하면 그려져요</p>';
+  const W=320,H=132,px=14,py=22,mx=Math.max(1,...pts.map(p=>Math.max(p.v,p.t)))*1.1,bw=(W-px*2)/pts.length,vx=Math.max(1,...pts.map(p=>p.vol))*1.15;
+  const y=v=>py+(H-py*2)*(1-v/mx),yv=v=>py+(H-py*2)*(1-v/vx),cx=i=>px+bw*i+bw/2,t=pts[0].t,f=v=>v.toFixed(1);
+  const vp=pts.map((p,i)=>({x:cx(i),y:yv(p.vol),v:p.vol})).filter(p=>p.v>0);
+  const ton=v=>v>=1000?(v/1000).toFixed(1)+'t':Math.round(v)+'kg';
+  return `<svg class="wkc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="${px}" x2="${W-px}" y1="${f(y(t))}" y2="${f(y(t))}" stroke="var(--ok)" stroke-dasharray="4 4"/>
+  ${pts.map((p,i)=>p.v?`<rect x="${f(px+bw*i+bw*.2)}" y="${f(y(p.v))}" width="${f(bw*.6)}" height="${f(H-py-y(p.v))}" rx="2" fill="${p.v>p.t*1.1?'var(--sig)':'var(--ok)'}" opacity=".85"/><text x="${f(cx(i))}" y="${f(H-py-4)}" text-anchor="middle" style="fill:#0a0a0a">${(p.v/1000).toFixed(1)}k</text>`:'').join('')}
+  ${vp.length>1?`<path d="${vp.map((p,i)=>(i?'L':'M')+f(p.x)+' '+f(p.y)).join(' ')}" fill="none" stroke="var(--p-blue)" stroke-width="2.4" stroke-linejoin="round"/>`:''}
+  ${vp.map(p=>`<circle cx="${f(p.x)}" cy="${f(p.y)}" r="3.4" fill="var(--bg)" stroke="var(--p-blue)" stroke-width="2.2"/><text x="${f(p.x)}" y="${f(p.y-7)}" text-anchor="middle" style="fill:var(--p-blue)">${ton(p.v)}</text>`).join('')}
+  ${pts.map((p,i)=>`<text x="${f(cx(i))}" y="${H-2}" text-anchor="middle" class="d">${md(p.d)}</text>`).join('')}</svg>`}
 function wkCard(){const S=wkSeries();
   return `<div class="panel fb wk"><div class="row"><h3>주간 리포트</h3><span class="sp"></span><span class="small">최근 기록</span></div>
   <div class="fbs"><small>체중 (kg)</small>${lineSVG(S.w,'kg')}</div>
-  <div class="fbs"><small>하루 섭취 (점선 = 목표 ${(+prof().kcal).toLocaleString()}kcal, 주황 = 초과)</small>${barSVG(S.k)}</div>
+  <div class="fbs"><small>막대 = 먹은 칼로리 (점선 목표 ${(+prof().kcal).toLocaleString()}kcal, 주황 = 초과) · <span style="color:var(--p-blue)">선 = 그날 든 무게</span></small>${barSVG(S.k)}</div>
   <div class="fbs"><small>메인 운동 무게</small><ul>${S.L.map(l=>`<li>${l.n} ${l.pts.length?l.pts.map(p=>`<b>${p.v}</b><span class="dim">(${md(p.d)})</span>`).join(' → '):'<span class="dim">아직 기록 없음</span>'}</li>`).join('')}</ul></div></div>`}
 function renderLog(){
   const ds=allDates().slice(0,21),m=monday();
