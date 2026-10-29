@@ -269,67 +269,93 @@ const POSES=[
   {k:'twist',n:'트위스트 이두',a:(S,W)=>({L:{e:[-(S+18),98],w:[-(S+8),72]},R:{e:[S+16,104],w:[S+21,80]}}),z:'ff',face:'grin',tilt:3},
   {k:'arnold',n:'아놀드 클래식',a:(S,W)=>({L:{e:[-(S+16),112],w:[-(S+2),96]},R:{e:[S+18,90],w:[S+12,64]}}),z:'ff',face:'grin',tilt:-3}
 ];
-function charSVG(m,pose){
+/* character look: start body type + colours. Everyone starts out of shape; fat melts first (ef), muscle builds over the whole range (m) */
+const BODIES={
+  belly:{n:'배불뚝이',d:'회식 10년, 바지 단추가 위태로워요',gut:1,S:28,W:24,B:20,ru:5.5,re:4.8,rw:4,rd:7,rt:7.5,ra:5,neck:12,jaw:4,cheek:2,chin:.6,moob:.6},
+  skinny:{n:'멸치',d:'바람 불면 날아가요. 팔이 젓가락',gut:0,S:21,W:15.5,B:0,ru:3.6,re:3.3,rw:3.2,rd:4.2,rt:5.2,ra:3.7,neck:7.5,jaw:1,cheek:-2.5,chin:0,moob:0},
+  chubby:{n:'통통이',d:'어딜 잡아도 말랑말랑',gut:.8,S:35,W:31,B:13,ru:9.5,re:8,rw:6,rd:10,rt:12.5,ra:7.5,neck:16,jaw:2,cheek:5,chin:1,moob:1},
+  skinnyfat:{n:'마른 비만',d:'팔다리는 가는데 배만 볼록',gut:.9,S:24,W:22,B:18,ru:4.2,re:3.8,rw:3.4,rd:5,rt:6.5,ra:4.2,neck:9,jaw:2,cheek:1,chin:.3,moob:.4}};
+const BODY_END={gut:0,S:46,W:20,B:0,ru:12.5,re:8.5,rw:6.5,rd:15,rt:15,ra:7.5,neck:20,jaw:9,cheek:0,chin:0,moob:0};
+const SKINS=[['#ffe6d2','#f9d0b0','#e0aa82'],['#ffd9b8','#f4bd92','#d9946a'],['#f0c08f','#d99c68','#b0703f'],['#b9805a','#9a6040','#6e3f25']];
+const HAIRS=[['spiky','삐죽 머리'],['buzz','짧은 머리'],['bald','민머리'],['long','긴 머리'],['pony','포니테일']];
+const HAIRC=[['#1e1d22','#55545c'],['#5a3a24','#8a5e40'],['#c9963a','#ecc36e'],['#8e8e94','#c4c4ca']];
+const ACCS=[['#ff7a3d','#ff5b1f','#d9440f'],['#7c9bff','#4f6ef7','#3450c9'],['#5ed39c','#2fb67a','#1e8a5a'],['#ff8ab8','#ff5c9a','#d93a78'],['#b29bff','#8a6cff','#6648d9']];
+const LOOK0={body:'belly',skin:1,hair:'spiky',hairc:0,acc:0};
+function lookOf(l){return Object.assign({},LOOK0,l||{})}
+/* pose that suits a level: relaxed beginner, flexing later */
+function poseFor(lv){return lv<5?0:lv<12?1:lv<20?2:lv<27?3:6}
+let svgUid=0;
+function charSVG(m,pose,look){
+  const L=lookOf(look),BD=BODIES[L.body]||BODIES.belly,ef=Math.min(1,m*1.7),lp=(k,e)=>BD[k]+(BODY_END[k]-BD[k])*e;
+  const sk=SKINS[L.skin]||SKINS[1],hc=HAIRC[L.hairc]||HAIRC[0],ac=ACCS[L.acc]||ACCS[0],u='c'+(++svgUid);
   const P=POSES[typeof pose==='number'?pose%POSES.length:pose?1:0];
   const f=v=>(+v).toFixed(1),c=80,OL='#1a1410',SW=2.4;
-  const S=30+16*m,W0=24-4*m,W=W0+(P.lat?P.lat*(.4+m):0)-(P.vac?3+2*m:0),B=14*(1-m);
+  const S=lp('S',m),W0=lp('W',ef),W=W0+(P.lat?P.lat*(.4+m):0)-(P.vac?3+2*m:0),B=lp('B',ef);
   const cap=(ax,ay,ra,bx,by,rb)=>{const dx=bx-ax,dy=by-ay,L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L;
     return `M${f(ax+nx*ra)} ${f(ay+ny*ra)} L${f(bx+nx*rb)} ${f(by+ny*rb)} A${f(rb)} ${f(rb)} 0 0 0 ${f(bx-nx*rb)} ${f(by-ny*rb)} L${f(ax-nx*ra)} ${f(ay-ny*ra)} A${f(ra)} ${f(ra)} 0 0 0 ${f(ax+nx*ra)} ${f(ay+ny*ra)}Z`};
-  const st=`stroke="${OL}" stroke-width="${SW}" stroke-linejoin="round"`;
+  const st=`stroke="${OL}" stroke-width="${SW}" stroke-linejoin="round"`,SK=`url(#sk${u})`;
   // ---- arms
-  const J=P.a(S,W0),ru=6.5+6*m,re=5.5+3*m,rw=4.5+2*m,rd=8+7*m;
+  const J=P.a(S,W0),ru=lp('ru',m),re=lp('re',m),rw=lp('rw',m),rd=lp('rd',m);
   const arm=s=>{const j=s<0?J.L:J.R,sx=c+s*(S-3),sy=95,ex=c+j.e[0],ey=j.e[1],wx=c+j.w[0],wy=j.w[1];
     const dx=ex-sx,dy=ey-sy,L=Math.hypot(dx,dy)||1,ang=Math.atan2(dy,dx)*180/Math.PI;
     // biceps bulges toward the folded forearm; bend 0 (straight) .. 1 (fully folded)
     const cr=dx*(wy-ey)-dy*(wx-ex),fl=Math.hypot(wx-ex,wy-ey)||1,bend=Math.min(1,Math.max(0,1-(dx*(wx-ex)+dy*(wy-ey))/(L*fl))*.9);
     const sg=cr>0?1:-1,nx=-dy/L*sg,ny=dx/L*sg,off=ru*(.25+.35*bend);
     const bx=(sx+ex)/2+nx*off,by=(sy+ey)/2+ny*off;
-    const bic=m>.15?`<ellipse cx="${f(bx)}" cy="${f(by)}" rx="${f(L*.3+2*m)}" ry="${f(ru*(.7+.15*bend)+3.5*m*bend+1.5*m)}" fill="url(#sk)" ${st} transform="rotate(${f(ang)} ${f(bx)} ${f(by)})"/>`:'';
+    const bic=m>.15?`<ellipse cx="${f(bx)}" cy="${f(by)}" rx="${f(L*.3+2*m)}" ry="${f(ru*(.7+.15*bend)+3.5*m*bend+1.5*m)}" fill="${SK}" ${st} transform="rotate(${f(ang)} ${f(bx)} ${f(by)})"/>`:'';
     const up_=wy<ey-6;
-    const fist=`<circle cx="${f(wx)}" cy="${f(wy+(up_?-2:3))}" r="${f(rw+2.2)}" fill="url(#sk)" ${st}/>`+
+    const fist=`<circle cx="${f(wx)}" cy="${f(wy+(up_?-2:3))}" r="${f(rw+2.2)}" fill="${SK}" ${st}/>`+
       (up_&&!P.back?`<path d="M${f(wx-s*3)} ${f(wy-5)} q${f(s*3)} -2 ${f(s*5)} 0" stroke="${OL}" stroke-width="1.4" fill="none" stroke-linecap="round"/>`:'');
-    const delt=`<circle cx="${f(sx+s*2)}" cy="${f(sy-1)}" r="${f(rd*(bend>.4?.85:1))}" fill="url(#sk)" ${st}/>`;
-    const up=`<path d="${cap(sx,sy,ru,ex,ey,re)}" fill="url(#sk)" ${st}/>`,fo=`<path d="${cap(ex,ey,re,wx,wy,rw)}" fill="url(#sk)" ${st}/>`;
+    const delt=`<circle cx="${f(sx+s*2)}" cy="${f(sy-1)}" r="${f(rd*(bend>.4?.85:1))}" fill="${SK}" ${st}/>`;
+    const up=`<path d="${cap(sx,sy,ru,ex,ey,re)}" fill="${SK}" ${st}/>`,fo=`<path d="${cap(ex,ey,re,wx,wy,rw)}" fill="${SK}" ${st}/>`;
     return bend>.35?`${delt}${fo}${up}${bic}${fist}`:`${fo}${fist}${up}${bic}${delt}`};
   const zL=P.z[0],zR=P.z[1],armsB=(zL==='b'?arm(-1):'')+(zR==='b'?arm(1):''),armsF=(zL==='f'?arm(-1):'')+(zR==='f'?arm(1):'');
   // ---- legs & shoes
-  const rt=9+6*m,ra=5.5+2*m,hx=W0*.52,ax=W0*.48;
-  const leg=s=>`<path d="${cap(c+s*hx,148,rt,c+s*ax,181,ra)}" fill="url(#sk)" ${st}/>`+
-    (m>.45?`<path d="M${f(c+s*(hx+rt*.15))} 152 q${f(-s*4)} 10 ${f(-s*1)} 20" stroke="#b9764d" stroke-width="1.4" fill="none" opacity="${f(Math.min(1,(m-.45)*3))}"/>`:'')+
+  const rt=lp('rt',m),ra=lp('ra',m),hx=W0*.52,ax=W0*.48;
+  const leg=s=>`<path d="${cap(c+s*hx,148,rt,c+s*ax,181,ra)}" fill="${SK}" ${st}/>`+
+    (m>.45?`<path d="M${f(c+s*(hx+rt*.15))} 152 q${f(-s*4)} 10 ${f(-s*1)} 20" stroke="${sk[2]}" stroke-width="1.4" fill="none" opacity="${f(Math.min(1,(m-.45)*3))}"/>`:'')+
     `<path d="M${f(c+s*ax-(s>0?7:10))} 190 Q${f(c+s*ax-(s>0?8:10))} 179 ${f(c+s*ax)} 179 Q${f(c+s*ax+(s>0?10:8))} 179 ${f(c+s*ax+(s>0?11:8))} 190Z" fill="#f5f5f2" ${st}/>`+
-    `<path d="M${f(c+s*ax-6)} 186 Q${f(c+s*ax)} 182 ${f(c+s*ax+6)} 185" stroke="#ff5b1f" stroke-width="2" fill="none" stroke-linecap="round"/>`;
+    `<path d="M${f(c+s*ax-6)} 186 Q${f(c+s*ax)} 182 ${f(c+s*ax+6)} 185" stroke="${ac[1]}" stroke-width="2" fill="none" stroke-linecap="round"/>`;
   // ---- torso
   const skinT=`M${f(c-S)} 92 C${f(c-S-1)} 108 ${f(c-W-B)} 118 ${f(c-W)} 136 L${f(c+W)} 136 C${f(c+W+B)} 118 ${f(c+S+1)} 108 ${f(c+S)} 92 Q${c} 80 ${f(c-S)} 92Z`;
   const neckY=P.back?90:99;
   const tank=`M${f(c-S+10)} 86 L${c-11} 86 Q${c} ${neckY} ${c+11} 86 L${f(c+S-10)} 86 Q${f(c+S-7)} 97 ${f(c+S-3)} 105 C${f(c+S)} 116 ${f(c+W+B)} 121 ${f(c+W+.5)} 137 L${f(c-W-.5)} 137 C${f(c-W-B)} 121 ${f(c-S)} 116 ${f(c-S+3)} 105 Q${f(c-S+7)} 97 ${f(c-S+10)} 86Z`;
-  const mo=v=>f(Math.min(1,v));
+  const mo=v=>f(Math.min(1,v)),dk=ac[2];
   let det='';
   if(P.back){
-    det=`<path d="M${c} 92 V132" stroke="#b33a0d" stroke-width="1.6" opacity=".7"/>`+
-      (m>.3?`<path d="M${f(c-S+6)} 102 Q${f(c-W-4)} 118 ${f(c-6)} 132 M${f(c+S-6)} 102 Q${f(c+W+4)} 118 ${f(c+6)} 132" stroke="#b33a0d" stroke-width="1.6" fill="none" opacity="${mo((m-.3)*3)}"/>`:'')+
-      (m>.5?`<path d="M${f(c-S*.55)} 95 Q${f(c-S*.3)} 101 ${c-3} 98 M${f(c+S*.55)} 95 Q${f(c+S*.3)} 101 ${c+3} 98" stroke="#b33a0d" stroke-width="1.4" fill="none" opacity="${mo((m-.5)*3)}"/>`:'');
+    det=`<path d="M${c} 92 V132" stroke="${dk}" stroke-width="1.6" opacity=".7"/>`+
+      (m>.3?`<path d="M${f(c-S+6)} 102 Q${f(c-W-4)} 118 ${f(c-6)} 132 M${f(c+S-6)} 102 Q${f(c+W+4)} 118 ${f(c+6)} 132" stroke="${dk}" stroke-width="1.6" fill="none" opacity="${mo((m-.3)*3)}"/>`:'')+
+      (m>.5?`<path d="M${f(c-S*.55)} 95 Q${f(c-S*.3)} 101 ${c-3} 98 M${f(c+S*.55)} 95 Q${f(c+S*.3)} 101 ${c+3} 98" stroke="${dk}" stroke-width="1.4" fill="none" opacity="${mo((m-.5)*3)}"/>`:'');
   }else{
-    const pec=m>.35?`<path d="M${f(c-S*.62)} 104 Q${f(c-S*.3)} ${f(112+3*m)} ${c} 105 Q${f(c+S*.3)} ${f(112+3*m)} ${f(c+S*.62)} 104" stroke="#b33a0d" stroke-width="1.8" fill="none" stroke-linecap="round" opacity="${mo((m-.35)*3)}"/>`:'';
+    const pec=m>.35?`<path d="M${f(c-S*.62)} 104 Q${f(c-S*.3)} ${f(112+3*m)} ${c} 105 Q${f(c+S*.3)} ${f(112+3*m)} ${f(c+S*.62)} 104" stroke="${dk}" stroke-width="1.8" fill="none" stroke-linecap="round" opacity="${mo((m-.35)*3)}"/>`:'';
+    const mb=lp('moob',ef);
+    const moob=mb>.05?`<path d="M${f(c-S*.7)} 103 Q${f(c-S*.45)} ${f(117+4*mb)} ${c-3} 108 M${f(c+S*.7)} 103 Q${f(c+S*.45)} ${f(117+4*mb)} ${c+3} 108" stroke="${dk}" stroke-width="1.6" fill="none" stroke-linecap="round" opacity="${mo(mb*1.2)}"/>`:'';
     const ab=P.abs||P.vac?Math.max(.6,m):m;
-    const abs=ab>.55?`<g stroke="#b33a0d" stroke-width="1.5" stroke-linecap="round" opacity="${mo((ab-.55)*3)}"><path d="M${c} 112v20M${c-8} 118h5M${c+3} 118h5M${c-8} 125h5M${c+3} 125h5${P.abs?`M${c-8} 131h5M${c+3} 131h5`:''}"/></g>`:'';
-    const vac=P.vac?`<path d="M${f(c-W+3)} 121 Q${c} 127 ${f(c+W-3)} 121" stroke="#b33a0d" stroke-width="1.6" fill="none"/>`:'';
-    const belly=m<.4&&!P.vac?`<path d="M${f(c-W-B*.6)} 124 Q${c} ${f(132+B*.4)} ${f(c+W+B*.6)} 124" stroke="#b33a0d" stroke-width="1.6" fill="none" opacity="${f(1-m*2.5)}"/>`:'';
-    det=pec+abs+vac+belly;
+    const abs=ab>.55?`<g stroke="${dk}" stroke-width="1.5" stroke-linecap="round" opacity="${mo((ab-.55)*3)}"><path d="M${c} 112v20M${c-8} 118h5M${c+3} 118h5M${c-8} 125h5M${c+3} 125h5${P.abs?`M${c-8} 131h5M${c+3} 131h5`:''}"/></g>`:'';
+    const vac=P.vac?`<path d="M${f(c-W+3)} 121 Q${c} 127 ${f(c+W-3)} 121" stroke="${dk}" stroke-width="1.6" fill="none"/>`:'';
+    const belly=B>4&&!P.vac?`<path d="M${f(c-W-B*.6)} 124 Q${c} ${f(132+B*.4)} ${f(c+W+B*.6)} 124" stroke="${dk}" stroke-width="1.6" fill="none" opacity="${mo(B/14)}"/>`:'';
+    det=pec+moob+abs+vac+belly;
   }
   const tr=m>.4||P.traps?`<path d="M${c-7} 80 Q${f(c-S*.6)} ${P.traps?78:82} ${f(c-S+4)} 89 M${c+7} 80 Q${f(c+S*.6)} ${P.traps?78:82} ${f(c+S-4)} 89" stroke="${OL}" stroke-width="1.6" fill="none" opacity="${P.traps?.85:.6}"/>`:'';
   const shorts=`M${f(c-W0-1.5)} 134 L${f(c+W0+1.5)} 134 L${f(c+W0+4)} 155 L${c+2} 155 L${c} 147 L${c-2} 155 L${f(c-W0-4)} 155Z`;
   // ---- head
-  const jaw=4+5*m;
-  const face=`M55 46 Q55 ${f(70+jaw*.3)} ${f(66-jaw*.4)} ${f(74+jaw*.2)} Q${c} ${f(80+jaw*.15)} ${f(94+jaw*.4)} ${f(74+jaw*.2)} Q105 ${f(70+jaw*.3)} 105 46 Q105 23 ${c} 23 Q55 23 55 46Z`;
-  const hair=`M53 50 Q49 28 63 18 L61 8 L71 14 L76 2 L84 13 L95 5 L94 16 L107 13 L102 23 Q111 32 107 50 Q103 38 92 35 Q82 42 70 37 Q60 41 53 50Z`;
+  const jaw=lp('jaw',m),cw=lp('cheek',ef),chin=lp('chin',ef),xl=55-cw,xr=105+cw;
+  const face=`M55 46 Q${f(xl)} ${f(70+jaw*.3)} ${f(66-jaw*.4-cw*.6)} ${f(74+jaw*.2)} Q${c} ${f(80+jaw*.15)} ${f(94+jaw*.4+cw*.6)} ${f(74+jaw*.2)} Q${f(xr)} ${f(70+jaw*.3)} 105 46 Q105 23 ${c} 23 Q55 23 55 46Z`;
+  const dchin=chin>.1?`<path d="M${f(67-cw*.4)} ${f(79+jaw*.2)} Q${c} ${f(89+chin*3)} ${f(93+cw*.4)} ${f(79+jaw*.2)}Z" fill="${SK}" ${st} stroke-width="1.8" opacity="${mo(chin*1.4)}"/>`:'';
+  const H=L.hair,band=(back)=>back?`<path d="M55 37 Q${c} 31 105 37 L105 43 Q${c} 37 55 43Z" fill="${ac[1]}" ${st} stroke-width="1.8"/><path d="M56 38 l-9 -5 l2 7 l-6 3 l11 0Z" fill="${ac[1]}" ${st} stroke-width="1.6"/>`:
+    `<path d="M55 37 Q${c} 28 105 37 L105 43 Q${c} 34 55 43Z" fill="${ac[1]}" ${st} stroke-width="1.8"/><path d="M104 38 l9 -5 l-2 7 l6 3 l-11 0Z" fill="${ac[1]}" ${st} stroke-width="1.6"/>`;
+  const hairBehind=H==='long'?`<path d="M50 86 Q40 46 58 24 Q80 10 102 24 Q120 46 110 86 Q100 82 99 64 L61 64 Q60 82 50 86Z" fill="${hc[0]}" ${st}/>`:
+    H==='pony'?`<path d="M99 28 Q126 30 120 68 Q116 54 104 42Z" fill="${hc[0]}" ${st}/>`:'';
+  const hairFront=H==='spiky'?`<path d="M53 50 Q49 28 63 18 L61 8 L71 14 L76 2 L84 13 L95 5 L94 16 L107 13 L102 23 Q111 32 107 50 Q103 38 92 35 Q82 42 70 37 Q60 41 53 50Z" fill="${hc[0]}" ${st}/><path d="M66 20 Q72 16 80 17" stroke="${hc[1]}" stroke-width="2" fill="none" stroke-linecap="round"/>`:
+    H==='buzz'||H==='pony'?`<path d="M54 46 Q52 22 80 19 Q108 22 106 46 Q101 32 80 30 Q59 32 54 46Z" fill="${hc[0]}" ${st}/><path d="M66 24 Q72 21 80 21" stroke="${hc[1]}" stroke-width="2" fill="none" stroke-linecap="round"/>`:
+    H==='long'?`<path d="M55 48 Q51 24 80 18 Q109 24 105 48 Q98 33 86 33 Q74 40 62 35 Q57 40 55 48Z" fill="${hc[0]}" ${st}/><path d="M66 23 Q72 19 80 20" stroke="${hc[1]}" stroke-width="2" fill="none" stroke-linecap="round"/>`:
+    `<ellipse cx="70" cy="29" rx="7" ry="3" fill="#fff" opacity=".35"/>`;
   let head;
   if(P.back){
-    head=`<circle cx="54" cy="52" r="5" fill="url(#sk)" ${st}/><circle cx="106" cy="52" r="5" fill="url(#sk)" ${st}/>
-    <path d="${face}" fill="url(#sk)" ${st}/>
-    <path d="M53 52 Q49 26 63 18 L61 8 L71 14 L76 2 L84 13 L95 5 L94 16 L107 13 L102 23 Q111 32 107 52 Q106 66 95 70 Q${c} 74 65 70 Q54 66 53 52Z" fill="#1e1d22" ${st}/>
-    <path d="M66 24 Q72 20 80 21" stroke="#55545c" stroke-width="2" fill="none" stroke-linecap="round"/>
-    <path d="M55 37 Q${c} 31 105 37 L105 43 Q${c} 37 55 43Z" fill="#ff5b1f" ${st} stroke-width="1.8"/>
-    <path d="M56 38 l-9 -5 l2 7 l-6 3 l11 0Z" fill="#ff5b1f" ${st} stroke-width="1.6"/>`;
+    const backHair=H==='bald'?'':H==='spiky'?`<path d="M53 52 Q49 26 63 18 L61 8 L71 14 L76 2 L84 13 L95 5 L94 16 L107 13 L102 23 Q111 32 107 52 Q106 66 95 70 Q${c} 74 65 70 Q54 66 53 52Z" fill="${hc[0]}" ${st}/>`:
+      `<path d="M53 52 Q50 20 80 18 Q110 20 107 52 Q106 66 95 70 Q${c} 74 65 70 Q54 66 53 52Z" fill="${hc[0]}" ${st}/>`+(H==='long'?`<path d="M54 60 Q50 80 52 88 Q80 94 108 88 Q110 80 106 60Z" fill="${hc[0]}" ${st}/>`:'');
+    head=`${hairBehind&&H==='pony'?hairBehind:''}<circle cx="54" cy="52" r="5" fill="${SK}" ${st}/><circle cx="106" cy="52" r="5" fill="${SK}" ${st}/>
+    <path d="${face}" fill="${SK}" ${st}/>${backHair}${band(true)}`;
   }else{
     const fc=P.face||'grin';
     const brow=fc!=='smile'||m>.5?(fc==='strain'?`M62 45 L75 51 M98 45 L85 51`:`M63 47 L75 50 M97 47 L85 50`):`M63 49 L75 47 M97 49 L85 47`;
@@ -338,34 +364,35 @@ function charSVG(m,pose){
       (m<.25?`<ellipse cx="${c}" cy="68" rx="3" ry="2.4" fill="#7a2e1a"/>`:`<path d="M73 67 Q${c} 72 87 67" stroke="${OL}" stroke-width="2" fill="none" stroke-linecap="round"/>`);
     const veins=fc==='strain'?`<path d="M99 30 l3 4 l-3 3 l3 3" stroke="#d9440f" stroke-width="1.4" fill="none" stroke-linecap="round"/>`:'';
     const sweat=m<.25||fc==='strain'?`<path d="M108 40 q4 6 0 9 q-4 -3 0 -9Z" fill="#9fdcf0" stroke="#3d8bb0" stroke-width="1"/>`:'';
-    head=`<circle cx="54" cy="52" r="5" fill="url(#sk)" ${st}/><circle cx="106" cy="52" r="5" fill="url(#sk)" ${st}/>
-    <path d="${face}" fill="url(#sk)" ${st}/>
-    <path d="${hair}" fill="#1e1d22" ${st}/><path d="M66 20 Q72 16 80 17" stroke="#55545c" stroke-width="2" fill="none" stroke-linecap="round"/>
-    <path d="M55 37 Q${c} 28 105 37 L105 43 Q${c} 34 55 43Z" fill="#ff5b1f" ${st} stroke-width="1.8"/>
-    <path d="M104 38 l9 -5 l-2 7 l6 3 l-11 0Z" fill="#ff5b1f" ${st} stroke-width="1.6"/>
+    head=`${hairBehind}<circle cx="54" cy="52" r="5" fill="${SK}" ${st}/><circle cx="106" cy="52" r="5" fill="${SK}" ${st}/>
+    <path d="${face}" fill="${SK}" ${st}/>${dchin}
+    ${hairFront}${band(false)}
     <path d="${brow}" stroke="${OL}" stroke-width="3.2" stroke-linecap="round"/>
     <g class="eyes"><ellipse cx="69" cy="56" rx="4.4" ry="${fc==='strain'?3.6:5.2}" fill="#fff" ${st} stroke-width="1.6"/><ellipse cx="91" cy="56" rx="4.4" ry="${fc==='strain'?3.6:5.2}" fill="#fff" ${st} stroke-width="1.6"/>
      <ellipse cx="70" cy="57" rx="2.7" ry="${fc==='strain'?2.6:3.5}" fill="#2a1c14"/><ellipse cx="90" cy="57" rx="2.7" ry="${fc==='strain'?2.6:3.5}" fill="#2a1c14"/>
      <circle cx="71" cy="55.3" r="1.1" fill="#fff"/><circle cx="91" cy="55.3" r="1.1" fill="#fff"/></g>
-    <path d="M${c} 60 q-2 4 1 5" stroke="#b9764d" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-    <ellipse cx="62" cy="64" rx="4" ry="2.2" fill="#ff8a7a" opacity=".45"/><ellipse cx="98" cy="64" rx="4" ry="2.2" fill="#ff8a7a" opacity=".45"/>
+    <path d="M${c} 60 q-2 4 1 5" stroke="${sk[2]}" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+    <ellipse cx="${f(62-cw*.5)}" cy="64" rx="${f(4+Math.max(0,cw)*.4)}" ry="2.2" fill="#ff8a7a" opacity=".45"/><ellipse cx="${f(98+cw*.5)}" cy="64" rx="${f(4+Math.max(0,cw)*.4)}" ry="2.2" fill="#ff8a7a" opacity=".45"/>
     ${mouth}${veins}${sweat}`;
   }
-  const aura=m>.66?`<circle cx="${c}" cy="110" r="${f(60+20*m)}" fill="url(#au)" opacity="${f((m-.66)*2.6)}"/>`+
+  const aura=m>.66?`<circle cx="${c}" cy="110" r="${f(60+20*m)}" fill="url(#au${u})" opacity="${f((m-.66)*2.6)}"/>`+
     [[22,60],[138,52],[30,140],[132,128]].map(([x,y],i)=>`<path class="spk" style="animation-delay:${i*.4}s" d="M${x} ${y-5} L${x+1.5} ${y-1.5} L${x+5} ${y} L${x+1.5} ${y+1.5} L${x} ${y+5} L${x-1.5} ${y+1.5} L${x-5} ${y} L${x-1.5} ${y-1.5}Z" fill="#ffd27a"/>`).join(''):'';
-  const flexing=P.k!=='relax';
+  /* round gut: the tank stretches over it and skin peeks out under the hem */
+  const gt=lp('gut',ef),gw=W+B*.5,gutSVG=gt>.06&&!P.back?`<ellipse cx="${c}" cy="${f(136+2*gt)}" rx="${f(gw*.8)}" ry="${f(3+5*gt)}" fill="${SK}" ${st}/><path d="M${c-2.5} ${f(139+4*gt)} q2.5 2.5 5 0" stroke="${OL}" stroke-width="1.6" fill="none" stroke-linecap="round" opacity="${mo(gt*1.5)}"/>`:'',
+    gutBall=gt>.06&&!P.back?`<ellipse cx="${c}" cy="${f(126-2*gt)}" rx="${f(gw)}" ry="${f(6+10*gt)}" fill="url(#tk${u})" ${st}/><path d="M${f(c-gw*.5)} ${f(118-4*gt)} Q${c} ${f(113-5*gt)} ${f(c+gw*.5)} ${f(118-4*gt)}" stroke="#fff" stroke-width="2" fill="none" opacity=".25" stroke-linecap="round"/>`:'';
+  const flexing=P.k!=='relax',nk=lp('neck',m);
   return `<svg class="buddy${flexing?' flex':''}" viewBox="0 0 160 200" aria-hidden="true">
-  <defs><linearGradient id="sk" x1="0" x2="1"><stop offset="0" stop-color="#ffd9b8"/><stop offset=".55" stop-color="#f4bd92"/><stop offset="1" stop-color="#d9946a"/></linearGradient>
-  <linearGradient id="tk" x1="0" x2="1"><stop offset="0" stop-color="#ff7a3d"/><stop offset=".6" stop-color="#ff5b1f"/><stop offset="1" stop-color="#d9440f"/></linearGradient>
-  <radialGradient id="au"><stop offset="0" stop-color="#ff5b1f" stop-opacity=".55"/><stop offset="1" stop-color="#ff5b1f" stop-opacity="0"/></radialGradient></defs>
-  ${aura}<ellipse cx="${c}" cy="193" rx="${f(30+8*m)}" ry="4.5" fill="#000" opacity=".45"/>
+  <defs><linearGradient id="sk${u}" x1="0" x2="1"><stop offset="0" stop-color="${sk[0]}"/><stop offset=".55" stop-color="${sk[1]}"/><stop offset="1" stop-color="${sk[2]}"/></linearGradient>
+  <linearGradient id="tk${u}" x1="0" x2="1"><stop offset="0" stop-color="${ac[0]}"/><stop offset=".6" stop-color="${ac[1]}"/><stop offset="1" stop-color="${ac[2]}"/></linearGradient>
+  <radialGradient id="au${u}"><stop offset="0" stop-color="${ac[1]}" stop-opacity=".55"/><stop offset="1" stop-color="${ac[1]}" stop-opacity="0"/></radialGradient></defs>
+  ${aura}<ellipse cx="${c}" cy="193" rx="${f(Math.max(24,W0+S*.4)+4)}" ry="4.5" fill="#000" opacity=".45"/>
   <g class="bd"><g transform="rotate(${P.tilt||0} ${c} 190)">
    ${leg(-1)}${leg(1)}
-   <path d="${shorts}" fill="#26262b" ${st}/><path d="M${f(c-W0-1)} 138 L${f(c-W0-3)} 154 M${f(c+W0+1)} 138 L${f(c+W0+3)} 154" stroke="#ff5b1f" stroke-width="2.2"/>
+   <path d="${shorts}" fill="#26262b" ${st}/><path d="M${f(c-W0-1)} 138 L${f(c-W0-3)} 154 M${f(c+W0+1)} 138 L${f(c+W0+3)} 154" stroke="${ac[1]}" stroke-width="2.2"/>
    <g class="arms">${armsB}</g>
-   <path d="${skinT}" fill="url(#sk)" ${st}/>
-   <rect x="${f(c-6-4*m)}" y="70" width="${f(12+8*m)}" height="16" fill="url(#sk)" ${st}/>
-   <path d="${tank}" fill="url(#tk)" ${st}/>${det}${tr}
+   <path d="${skinT}" fill="${SK}" ${st}/>
+   <rect x="${f(c-nk/2)}" y="70" width="${f(nk)}" height="16" fill="${SK}" ${st}/>
+   ${gutSVG}<path d="${tank}" fill="url(#tk${u})" ${st}/>${gutBall}${det}${tr}
    <g class="arms">${armsF}</g>
    <g class="head">${head}</g>
   </g></g></svg>`;
@@ -373,7 +400,7 @@ function charSVG(m,pose){
 let poseI=null;
 function buddyCard(){
   const x=totalXP(),lv=lvOf(x),m=Math.min(1,(lv-1)/29),nt=nextTitle(lv),trained=doneKeys(log).length>0;
-  return `<section class="buddyc"><button type="button" class="bwrap" id="buddy" aria-label="캐릭터 포즈">${charSVG(m,poseI??(trained?1:0))}<span class="pose">${poseI==null?'탭해서 포즈':POSES[poseI].n}</span></button>
+  return `<section class="buddyc"><button type="button" class="bwrap" id="buddy" aria-label="캐릭터 포즈">${charSVG(m,poseI??(trained?Math.max(1,poseFor(lv)):0),prof().look)}<span class="pose">${poseI==null?'탭해서 포즈':POSES[poseI].n}</span></button>
   <div class="binfo"><span class="eyebrow">LV ${lv}</span><h2>${titleOf(lv)}</h2>
   <div class="bxp"><i style="width:${(x%XP_LV)/XP_LV*100}%"></i></div>
   <p class="small">${nt?`LV ${nt[0]}부터 <b>${nt[1]}</b>. 레벨이 오를수록 몸이 커져요`:'최고 칭호 달성'}${trained?' · 오늘 운동 완료 💪':''}</p></div></section>`;
@@ -432,7 +459,7 @@ function renderHome(){
 function cardioForm(){const c=log.cardio||{};return `<div class="cform"><div class="ctypes">${CARDIO.map(t=>`<button type="button" class="ct${(c.t||'수영')===t?' on':''}" data-t="${t}">${t}</button>`).join('')}</div>
   <div class="row"><input id="cmin" inputmode="numeric" placeholder="분" value="${esc(c.min||'40')}" aria-label="유산소 시간(분)"><span class="small">분</span><span class="sp"></span><button class="btn gold" type="button" id="csave" style="width:auto;padding:12px 18px">기록 +100XP</button></div></div>`}
 function bindHome(v){
-  const bd=document.getElementById('buddy');if(bd)bd.onclick=()=>{const x=totalXP(),lv=lvOf(x);poseI=poseI==null?1:(poseI+1)%POSES.length;bd.innerHTML=charSVG(Math.min(1,(lv-1)/29),poseI)+`<span class="pose">${POSES[poseI].n}</span>`;bd.firstChild.classList.add('pop2')};
+  const bd=document.getElementById('buddy');if(bd)bd.onclick=()=>{const x=totalXP(),lv=lvOf(x);poseI=poseI==null?1:(poseI+1)%POSES.length;bd.innerHTML=charSVG(Math.min(1,(lv-1)/29),poseI,prof().look)+`<span class="pose">${POSES[poseI].n}</span>`;bd.firstChild.classList.add('pop2')};
   const $=id=>document.getElementById(id);
   const toTrain=keys=>{session=keys;comboMode=keys.length>1;go('train')};
   if($('hstart'))$('hstart').onclick=()=>toTrain([nextDay()]);
@@ -569,7 +596,7 @@ function lineSVG(pts,unit){if(pts.length<2)return `<p class="small" style="margi
   const W=320,H=120,px=28,py=16,vs=pts.map(p=>p.v),lo=Math.min(...vs)-.5,hi=Math.max(...vs)+.5;
   const x=i=>px+(W-px*2)*i/(pts.length-1),y=v=>py+(H-py*2)*(1-(v-lo)/(hi-lo||1));
   const path=pts.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(p.v).toFixed(1)).join(' ');
-  return `<svg class="wkc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="var(--sig)" stroke-width="2.2" stroke-linejoin="round"/>${pts.map((p,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3.2" fill="var(--bg)" stroke="var(--sig)" stroke-width="2"/><text x="${x(i).toFixed(1)}" y="${(y(p.v)-7).toFixed(1)}" text-anchor="middle">${p.v}</text><text x="${x(i).toFixed(1)}" y="${H-2}" text-anchor="middle" class="d">${md(p.d)}</text>`).join('')}</svg>`}
+  return `<svg class="wkc" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path d="${path}" fill="none" stroke="var(--sig)" stroke-width="2.2" stroke-linejoin="round"/>${pts.map((p,i)=>{const lab=pts.length<=8||i===0||i===pts.length-1||i%Math.ceil(pts.length/5)===0&&pts.length-1-i>=Math.ceil(pts.length/10);return `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="${pts.length>14?2.2:3.2}" fill="var(--bg)" stroke="var(--sig)" stroke-width="2"/>${lab?`<text x="${x(i).toFixed(1)}" y="${(y(p.v)-7).toFixed(1)}" text-anchor="middle">${p.v}</text><text x="${x(i).toFixed(1)}" y="${H-2}" text-anchor="middle" class="d">${md(p.d)}</text>`:''}`}).join('')}</svg>`}
 function barSVG(pts){if(!pts.length)return '<p class="small" style="margin:0">식단을 기록하면 그려져요</p>';
   const W=320,H=120,px=14,py=16,mx=Math.max(...pts.map(p=>Math.max(p.v,p.t)))*1.1,bw=(W-px*2)/pts.length;
   const y=v=>py+(H-py*2)*(1-v/mx),t=pts[0].t;
@@ -601,10 +628,38 @@ function bindLog(v){
     resetArm=false;cycle.done=[];saveCycle();toast('순서를 가슴부터 다시 시작해요');render(true)};
 }
 
+/* ---------- character creator ---------- */
+let draftLook=null,previewLv=1;
+const GROW=[1,10,20,30];
+function lookEditor(){const L=draftLook;
+  const sw=(list,key,fn)=>list.map((v,i)=>`<button type="button" class="sw${L[key]===i?' on':''}" data-lk="${key}" data-v="${i}" style="background:${fn(v)}" aria-label="${key} ${i+1}"></button>`).join('');
+  return `<div class="panel lk"><div class="row"><h3>내 캐릭터</h3><span class="sp"></span><span class="small">운동할수록 몸이 바뀌어요</span></div>
+  <div class="lk-stage"><div class="lk-big" id="lkbig"></div><div class="lk-side">
+    <span class="eyebrow">성장 미리보기</span><b class="lk-lv" id="lklvt"></b>
+    <input type="range" min="1" max="30" value="${previewLv}" id="lklv" aria-label="미리볼 레벨">
+    <p class="small" style="margin:0">밀어서 LV 30까지 어떻게 변하는지 보세요</p></div></div>
+  <div class="grow" id="lkgrow"></div>
+  <small class="lk-h">시작 체형 · 처음엔 다들 이래요</small>
+  <div class="bodies">${Object.entries(BODIES).map(([k,b])=>`<button type="button" class="bodyb${L.body===k?' on':''}" data-lk="body" data-v="${k}"><span class="bthumb">${charSVG(0,0,Object.assign({},L,{body:k}))}</span><span><b>${b.n}</b><small>${b.d}</small></span></button>`).join('')}</div>
+  <small class="lk-h">머리 모양</small><div class="ctypes">${HAIRS.map(([k,n])=>`<button type="button" class="ct${L.hair===k?' on':''}" data-lk="hair" data-v="${k}">${n}</button>`).join('')}</div>
+  <div class="lk-row"><div><small class="lk-h">피부</small><div class="sws">${sw(SKINS,'skin',v=>v[1])}</div></div><div><small class="lk-h">머리 색</small><div class="sws">${sw(HAIRC,'hairc',v=>v[0])}</div></div></div>
+  <small class="lk-h">포인트 색 (머리띠·민소매)</small><div class="sws">${sw(ACCS,'acc',v=>v[1])}</div></div>`}
+function paintLook(){const big=document.getElementById('lkbig');if(!big)return;const lv=previewLv,m=(lv-1)/29;
+  big.innerHTML=charSVG(m,poseFor(lv),draftLook);document.getElementById('lklvt').textContent=`LV ${lv} · ${titleOf(lv)}`;
+  document.getElementById('lkgrow').innerHTML=GROW.map(g=>`<button type="button" class="gr${g===lv?' on':''}" data-g="${g}">${charSVG((g-1)/29,poseFor(g),draftLook)}<span>LV ${g}<small>${titleOf(g)}</small></span></button>`).join('<i>›</i>');
+  document.querySelectorAll('#lkgrow .gr').forEach(b=>b.onclick=()=>{previewLv=+b.dataset.g;document.getElementById('lklv').value=previewLv;paintLook()})}
+function bindLook(){const box=document.querySelector('.lk');if(!box)return;
+  box.querySelectorAll('[data-lk]').forEach(b=>b.onclick=()=>{const k=b.dataset.lk,v=b.dataset.v;draftLook[k]=k==='body'||k==='hair'?v:+v;
+    box.querySelectorAll(`[data-lk="${k}"]`).forEach(x=>x.classList.toggle('on',x===b));
+    if(k!=='body')box.querySelectorAll('.bodyb').forEach(x=>x.querySelector('.bthumb').innerHTML=charSVG(0,0,Object.assign({},draftLook,{body:x.dataset.v})));
+    paintLook()});
+  const r=document.getElementById('lklv');r.oninput=()=>{previewLv=+r.value;paintLook()};paintLook()}
+
 /* ---------- SETTINGS (내 정보) ---------- */
 function renderSet(){
-  const p=prof(),first=!PROF;
+  const p=prof(),first=!PROF;if(!draftLook)draftLook=lookOf(p.look);
   return `<div class="sec"><div><span class="eyebrow">${first?'Welcome':'Profile'}</span><h2 style="font-size:28px">${first?'처음 오셨네요':'내 정보'}</h2></div>
+  ${first?lookEditor():''}
   ${first?`<p class="small" style="margin:0">이름과 1RM만 넣으면 종목별 시작 무게가 자동으로 계산돼요.${SYNC_URL?' 기록은 팀 시트에 자동 저장돼서 폰을 바꿔도 이름과 PIN으로 다시 불러올 수 있어요.':' 기록은 이 브라우저에만 저장돼요.'}</p>`:''}
   ${first&&SYNC_URL?`<div class="panel"><h3>이미 쓰던 기록이 있어요</h3><p class="small" style="margin:0">다른 폰이나 PC에서 쓰던 이름과 PIN을 넣으면 기록을 그대로 불러와요.</p>
   <div class="fields"><label for="r-name"><span>이름</span><input id="r-name" placeholder="예: 민수"></label><label for="r-pin"><span>PIN</span><input id="r-pin" inputmode="numeric" type="password" placeholder="숫자 4~8자리"></label></div>
@@ -614,21 +669,22 @@ function renderSet(){
   <div class="panel"><h3>1RM (1회 최대 무게)</h3><p class="small" style="margin:0">모르면 5회 겨우 드는 무게 × 1.15 정도로 넣으세요. 비워두면 그 부위 무게는 안 나와요.</p>
   <div class="fields">${LIFTS.map(([k,n])=>`<label for="s-${k}"><span>${n} (kg)</span><input id="s-${k}" inputmode="decimal" placeholder="예: 100" value="${esc((p.rm||{})[k]||'')}"></label>`).join('')}</div></div>
   <div class="panel"><h3>하루 목표</h3><div class="fields"><label for="s-kcal"><span>칼로리 (kcal)</span><input id="s-kcal" inputmode="numeric" value="${esc(p.kcal)}"></label><label for="s-prot"><span>단백질 (g)</span><input id="s-prot" inputmode="numeric" value="${esc(p.prot)}"></label></div></div>
-  <button class="btn gold" type="button" id="ssave">${first?'시작하기':'저장'}</button>
+  ${first?'':lookEditor()}
+  <button class="btn gold" type="button" id="ssave">${first?'이 캐릭터로 시작하기':'저장'}</button>
   ${first?'':`<div class="panel"><h3>백업 · 기기 옮기기</h3><p class="small" style="margin:0">${SYNC_URL?'기록은 팀 시트에도 자동 저장돼요. 새 기기에서는 처음 화면의 "기록 불러오기"를 쓰면 돼요. 백업 파일은 혹시 몰라 따로 보관하고 싶을 때 쓰세요.':'기록은 이 브라우저에만 있어요. 폰을 바꾸거나 브라우저 데이터를 지우기 전에 백업 파일을 받아두세요.'}</p>
   <div class="row" style="gap:8px"><button class="btn ghost" type="button" id="sexp">백업 받기</button><button class="btn ghost" type="button" id="simp">백업 불러오기</button></div><input type="file" id="sfile" accept="application/json,.json" hidden></div>
   <button class="btn ghost" type="button" id="swipe" style="padding:10px;font-size:13px">이 기기의 내 기록 전부 지우기</button>`}</div>`;
 }
 let wipeArm=false;
 function bindSet(){
-  const $=id=>document.getElementById(id);
+  const $=id=>document.getElementById(id);bindLook();
   $('ssave').onclick=()=>{const num=v=>{const n=parseFloat(String(v).replace(',','.'));return n>0?n:''};
     const rm={};LIFTS.forEach(([k])=>rm[k]=num($('s-'+k).value));
     const name=$('s-name').value.trim(),pin=$('s-pin')?$('s-pin').value.trim():'';
     if(!name){toast('이름을 넣어 주세요');return}
     if(SYNC_URL&&!/^\d{4,8}$/.test(pin)){toast('PIN은 숫자 4~8자리로 정해 주세요');return}
     const old=PROF||{};
-    PROF={name,pin,rm,kcal:num($('s-kcal').value)||DEFAULT_TARGETS.kcal,prot:num($('s-prot').value)||DEFAULT_TARGETS.prot};
+    PROF={name,pin,look:draftLook,rm,kcal:num($('s-kcal').value)||DEFAULT_TARGETS.kcal,prot:num($('s-prot').value)||DEFAULT_TARGETS.prot};
     store.set('pt-profile',PROF);
     /* new identity on the sheet: send everything this device already has */
     if(SYNC_URL&&(old.name!==name||old.pin!==pin))markAllPending();
