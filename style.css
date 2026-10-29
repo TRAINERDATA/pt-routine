@@ -261,7 +261,7 @@ textarea{width:100%;min-height:160px;border-radius:4px;border:1px solid var(--li
 .timer.go{background:var(--ok)}
 
 /* toast */
-.toast{white-space:nowrap;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis;position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 14px);transform:translateX(-50%);z-index:40;padding:10px 18px;border-radius:999px;background:var(--fg);color:var(--bg);font-weight:700;font-size:13px;box-shadow:0 12px 30px -10px rgba(0,0,0,.8);animation:tin .25s}
+.toast{white-space:nowrap;z-index:80!important;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis;position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 14px);transform:translateX(-50%);z-index:40;padding:10px 18px;border-radius:999px;background:var(--fg);color:var(--bg);font-weight:700;font-size:13px;box-shadow:0 12px 30px -10px rgba(0,0,0,.8);animation:tin .25s}
 @keyframes tin{from{transform:translate(-50%,-12px);opacity:0}}
 
 /* complete overlay */

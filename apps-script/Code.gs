@@ -30,14 +30,31 @@ function doPost(e) {
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
 
-function doGet() {
-  return ContentService.createTextOutput('PT 루틴 기록 저장소가 동작 중이에요');
+/* GET ?p=<json>&cb=<name> answers as JSONP: Safari and some in-app browsers can't read the POST answer
+   (it comes back through a redirect), but they can always load it as a script */
+function doGet(e) {
+  const prm = (e && e.parameter) || {};
+  if (!prm.p) return ContentService.createTextOutput('PT 루틴 기록 저장소가 동작 중이에요');
+  let out;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    out = handle(JSON.parse(prm.p));
+  } catch (err) {
+    out = {ok: false, error: String((err && err.message) || err)};
+  } finally {
+    lock.releaseLock();
+  }
+  const cb = /^[A-Za-z_$][\w$]*$/.test(prm.cb || '') ? prm.cb : '';
+  if (!cb) return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(cb + '(' + JSON.stringify(out) + ')').setMimeType(ContentService.MimeType.JAVASCRIPT);
 }
 
 function handle(req) {
   if (req.action === 'save') return save(req);
   if (req.action === 'load') return load(req);
   if (req.action === 'coach') return coach(req);
+  if (req.action === 'check') { const a = auth(req, false); return a.error ? {ok: false, error: a.error} : {ok: true}; }
   return {ok: false, error: '알 수 없는 요청'};
 }
 

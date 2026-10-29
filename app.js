@@ -28,13 +28,27 @@ const store = {
    every change to a log, the cycle or the profile is queued in pt-pending and posted to the
    Apps Script web app (SYNC_URL in routine.js). Name + PIN identify the member on the sheet. */
 const SYNC_RE=/^pt-(log-\d{4}-\d{2}-\d{2}|cycle|profile)$/;
-let syncState='',syncErr='',syncT=null,syncBusy=false,syncAgain=false;
+let syncUnverified=false,syncState='',syncErr='',syncT=null,syncBusy=false,syncAgain=false;
 function syncOn(){return !!(SYNC_URL&&PROF&&PROF.name&&PROF.pin)}
 function markPending(k){if(!SYNC_URL||!SYNC_RE.test(k))return;const p=store.get('pt-pending',{});p[k]=Date.now();
-  try{localStorage.setItem('pt-pending',JSON.stringify(p))}catch(e){}queueSync()}
+  try{localStorage.setItem('pt-pending',JSON.stringify(p))}catch(e){}if(syncOn()&&syncState!=='auth')syncState='busy';queueSync()}
 function markAllPending(){try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k&&SYNC_RE.test(k))markPending(k)}}catch(e){}}
 function queueSync(ms){if(!syncOn()||syncState==='auth')return;clearTimeout(syncT);syncT=setTimeout(flushSync,ms==null?1500:ms)}
-async function syncPost(body){const r=await fetch(SYNC_URL,{method:'POST',body:JSON.stringify(body)});const j=await r.json();if(!j.ok)throw Object.assign(new Error(j.error||'저장 실패'),{auth:/PIN|이름/.test(j.error||'')});return j}
+function syncCheck(j){if(!j||!j.ok)throw Object.assign(new Error((j&&j.error)||'저장 실패'),{auth:/PIN|이름/.test((j&&j.error)||'')});return j}
+async function syncPost(body){
+  try{const r=await fetch(SYNC_URL,{method:'POST',body:JSON.stringify(body),credentials:'omit'});return syncCheck(await r.json())}
+  catch(e){if(e.auth)throw e;return syncFallback(body)}}
+/* Safari and in-app browsers sometimes can't read the answer, which arrives through a redirect.
+   Then: saves go as a fire-and-forget POST and are confirmed with a JSONP check; reads go over JSONP */
+async function syncFallback(body){
+  if(body.action==='save'){await fetch(SYNC_URL,{method:'POST',mode:'no-cors',body:JSON.stringify(body),credentials:'omit'});
+    try{return syncCheck(await jsonp({action:'check',name:body.name,pin:body.pin}))}catch(e){if(e.auth)throw e;return {ok:true,unverified:true}}}
+  return syncCheck(await jsonp(body))}
+let jsonpN=0;
+function jsonp(body){return new Promise((ok,bad)=>{const cb='__ptcb'+(++jsonpN)+'_'+Date.now(),sc=document.createElement('script');
+  const done=()=>{clearTimeout(t);delete window[cb];sc.remove()},t=setTimeout(()=>{done();bad(new Error('응답 없음'))},15000);
+  window[cb]=j=>{done();ok(j)};sc.onerror=()=>{done();bad(new Error('연결 실패'))};
+  sc.src=SYNC_URL+'?cb='+cb+'&p='+encodeURIComponent(JSON.stringify(body));document.head.appendChild(sc)})}
 /* one readable row for the trainer's sheet; the full log goes along as JSON for restoring */
 function sheetRow(lg){
   const parts=[],det=[];let sets=0;
@@ -53,13 +67,13 @@ async function flushSync(){
   batch.forEach(k=>{let v=store.get(k,null);if(v==null)return;
     if(k==='pt-profile'){v=Object.assign({},v);delete v.pin}
     const it={key:k,value:v};if(k.startsWith('pt-log-')){if(!Object.keys(v).length)return;it.row=sheetRow(v)}items.push(it)});
-  try{if(items.length)await syncPost({action:'save',name:PROF.name,pin:PROF.pin,items});
+  try{const res=items.length?await syncPost({action:'save',name:PROF.name,pin:PROF.pin,items}):{};syncUnverified=!!res.unverified;
     const cur=store.get('pt-pending',{});batch.forEach(k=>{if(cur[k]===pend[k])delete cur[k]});
     try{localStorage.setItem('pt-pending',JSON.stringify(cur))}catch(e){}
     syncState=Object.keys(cur).length?'busy':'ok';syncErr='';syncBusy=false;
     if(Object.keys(cur).length||syncAgain){syncAgain=false;queueSync(200)}}
   catch(e){syncBusy=false;syncErr=e.message||String(e);syncState=e.auth?'auth':'wait';if(!e.auth)queueSync(30000)}
-  renderHeader()}
+  renderHeader();paintClearSync()}
 window.addEventListener('online',()=>queueSync(0));
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){queueSync(0);fetchCoach()}});
 /* profile: name, 1RM per main lift, daily targets. Lives only in this browser */
@@ -198,8 +212,11 @@ function recommend(k,i,e){const H=hist(e.n,2);
 function sentLabel(){return '오늘 기록 복사'}
 function finishDay(){copyText(buildLog(today,log))}
 async function copyText(txt){
-  try{await navigator.clipboard.writeText(txt);toast('복사됐어요 · 트레이너나 Claude에게 붙여넣기');return}
-  catch(e){const o=document.getElementById('clear');o.hidden=false;o.innerHTML=`<div class="box" style="text-align:left"><h2 style="font-size:22px">길게 눌러 전체 복사</h2><textarea id="cpy" readonly>${esc(txt)}</textarea><button class="btn ghost" id="cx" type="button">닫기</button></div>`;const ta=document.getElementById('cpy');ta.focus();ta.select();document.getElementById('cx').onclick=()=>{o.hidden=true;o.innerHTML=''}}
+  try{await navigator.clipboard.writeText(txt);toast('클립보드에 복사했습니다');return}catch(e){}
+  /* older iOS / in-app browsers: copy through a hidden textarea */
+  try{const ta=document.createElement('textarea');ta.value=txt;ta.setAttribute('readonly','');ta.style.cssText='position:fixed;top:0;left:0;opacity:0';document.body.appendChild(ta);
+    ta.select();ta.setSelectionRange(0,txt.length);const okc=document.execCommand('copy');ta.remove();if(okc){toast('클립보드에 복사했습니다');return}}catch(e){}
+  {const o=document.getElementById('clear');o.hidden=false;o.innerHTML=`<div class="box" style="text-align:left"><h2 style="font-size:22px">길게 눌러 전체 복사</h2><textarea id="cpy" readonly>${esc(txt)}</textarea><button class="btn ghost" id="cx" type="button">닫기</button></div>`;const ta=document.getElementById('cpy');ta.focus();ta.select();document.getElementById('cx').onclick=()=>{o.hidden=true;o.innerHTML=''}}
 }
 /* items of a session: one day = all exercises; two days = first 4 of each (main lifts first) */
 function items(keys){
@@ -227,8 +244,8 @@ function startTimer(sec,label){
 function renderHeader(){
   const x=totalXP(),lv=lvOf(x),inLv=x%XP_LV;
   document.getElementById('hdr').innerHTML=`<div class="lv"><span><small>LV</small><b>${lv}</b></span></div>
-  <div class="xp"><div class="xp-top"><span>${now.getMonth()+1}/${now.getDate()} (${WEEKDAY[now.getDay()]}) ${PROF&&PROF.name?`<em class="sync">· ${esc(PROF.name)}</em>`:''}${syncOn()?`<em class="sync ${syncState==='ok'?'cloud':'local'}">${{ok:'● 저장됨',busy:'● 저장 중',wait:'● 대기',auth:'● PIN 확인'}[syncState]||'● 연결 중'}</em>`:''}</span><span><b>${inLv}</b> / ${XP_LV} XP</span></div><div class="xpbar"><i style="width:${inLv/XP_LV*100}%"></i></div></div>
-  <div class="streak"><b>${weekCount()}/${WEEK_GOAL}</b>이번 주</div>${SYNC_URL&&PROF&&!PROF.pin?`<div class="offwarn">내 정보에서 PIN을 정하면 기록이 팀 시트에 자동 저장돼요</div>`:syncState==='auth'?`<div class="offwarn">시트 저장 안 됨: ${/PIN이 맞지/.test(syncErr)?'이 이름이 다른 PIN으로 이미 등록돼 있어요. 내 정보에서 PIN을 확인하거나, 다른 사람이면 이름을 바꿔 주세요 (예: 김민수)':esc(syncErr)}</div>`:syncState==='wait'?`<div class="offwarn">인터넷이 연결되면 자동으로 저장돼요. 기록은 폰에 안전하게 있어요</div>`:''}`;
+  <div class="xp"><div class="xp-top"><span>${now.getMonth()+1}/${now.getDate()} (${WEEKDAY[now.getDay()]}) ${PROF&&PROF.name?`<em class="sync">· ${esc(PROF.name)}</em>`:''}${syncOn()?`<em class="sync ${syncState==='ok'?'cloud':'local'}">${{ok:syncUnverified?'● 보냄':'● 저장됨',busy:'● 저장 중',wait:'● 대기',auth:'● PIN 확인'}[syncState]||'● 연결 중'}</em>`:''}</span><span><b>${inLv}</b> / ${XP_LV} XP</span></div><div class="xpbar"><i style="width:${inLv/XP_LV*100}%"></i></div></div>
+  <div class="streak"><b>${weekCount()}/${WEEK_GOAL}</b>이번 주</div>${SYNC_URL&&PROF&&!PROF.pin?`<div class="offwarn">내 정보에서 PIN을 정하면 기록이 팀 시트에 자동 저장돼요</div>`:syncState==='auth'?`<div class="offwarn">시트 저장 안 됨: ${/PIN이 맞지/.test(syncErr)?'이 이름이 다른 PIN으로 이미 등록돼 있어요. 내 정보에서 PIN을 확인하거나, 다른 사람이면 이름을 바꿔 주세요 (예: 김민수)':esc(syncErr)}</div>`:syncState==='wait'?`<div class="offwarn">시트 저장 대기 중이에요. 기록은 폰에 안전하게 있고, 연결되면 자동으로 올라가요${syncErr?` (원인: ${esc(syncErr)})`:''}</div>`:''}`;
 }
 const ICONS={
   home:'<svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></svg>',
@@ -271,10 +288,10 @@ const POSES=[
 ];
 /* character look: start body type + colours. Everyone starts out of shape; fat melts first (ef), muscle builds over the whole range (m) */
 const BODIES={
-  belly:{n:'배불뚝이',d:'회식 10년, 바지 단추가 위태로워요',gut:1,S:28,W:24,B:20,ru:5.5,re:4.8,rw:4,rd:7,rt:7.5,ra:5,neck:12,jaw:4,cheek:2,chin:.6,moob:.6},
-  skinny:{n:'멸치',d:'바람 불면 날아가요. 팔이 젓가락',gut:0,S:21,W:15.5,B:0,ru:3.6,re:3.3,rw:3.2,rd:4.2,rt:5.2,ra:3.7,neck:7.5,jaw:1,cheek:-2.5,chin:0,moob:0},
-  chubby:{n:'통통이',d:'어딜 잡아도 말랑말랑',gut:.8,S:35,W:31,B:13,ru:9.5,re:8,rw:6,rd:10,rt:12.5,ra:7.5,neck:16,jaw:2,cheek:5,chin:1,moob:1},
-  skinnyfat:{n:'마른 비만',d:'팔다리는 가는데 배만 볼록',gut:.9,S:24,W:22,B:18,ru:4.2,re:3.8,rw:3.4,rd:5,rt:6.5,ra:4.2,neck:9,jaw:2,cheek:1,chin:.3,moob:.4}};
+  belly:{n:'든든형',d:'배 쪽부터 가벼워지면서 탄탄해져요',gut:1,S:28,W:24,B:20,ru:5.5,re:4.8,rw:4,rd:7,rt:7.5,ra:5,neck:12,jaw:4,cheek:2,chin:.6,moob:.6},
+  skinny:{n:'슬림형',d:'근육이 붙으면서 어깨가 넓어져요',gut:0,S:21,W:15.5,B:0,ru:3.6,re:3.3,rw:3.2,rd:4.2,rt:5.2,ra:3.7,neck:7.5,jaw:1,cheek:-2.5,chin:0,moob:0},
+  chubby:{n:'포근형',d:'전체적으로 가벼워지고 단단해져요',gut:.8,S:35,W:31,B:13,ru:9.5,re:8,rw:6,rd:10,rt:12.5,ra:7.5,neck:16,jaw:2,cheek:5,chin:1,moob:1},
+  skinnyfat:{n:'말랑형',d:'팔다리엔 근육이, 배는 납작하게',gut:.9,S:24,W:22,B:18,ru:4.2,re:3.8,rw:3.4,rd:5,rt:6.5,ra:4.2,neck:9,jaw:2,cheek:1,chin:.3,moob:.4}};
 const BODY_END={gut:0,S:46,W:20,B:0,ru:12.5,re:8.5,rw:6.5,rd:15,rt:15,ra:7.5,neck:20,jaw:9,cheek:0,chin:0,moob:0};
 const SKINS=[['#ffe6d2','#f9d0b0','#e0aa82'],['#ffd9b8','#f4bd92','#d9946a'],['#f0c08f','#d99c68','#b0703f'],['#b9805a','#9a6040','#6e3f25']];
 const HAIRS=[['spiky','삐죽 머리'],['buzz','짧은 머리'],['bald','민머리'],['long','긴 머리'],['pony','포니테일']];
@@ -531,7 +548,7 @@ function bindTrain(v){
     const keys=session,already=keys.every(k=>(log.done||{})[k]);
     const before=lvOf(totalXP());
     log.done=log.done||{};keys.forEach(k=>log.done[k]=true);delete log.pass;save();
-    const wrapped=!already&&markDone(keys);
+    const wrapped=!already&&markDone(keys);queueSync(0);
     const after=lvOf(totalXP());
     showClear(keys,!already&&after>before?after:0,wrapped);
     render(true);
@@ -539,6 +556,10 @@ function bindTrain(v){
 }
 
 /* ---------- clear overlay ---------- */
+/* status line on the workout-complete screen, refreshed whenever a sync round finishes */
+function paintClearSync(){const el=document.getElementById('csync');if(!el)return;
+  const st=syncState==='ok'?['ok','✓ 오늘 기록이 팀 시트에 저장됐어요']:syncState==='auth'?['ng','✗ 이름·PIN이 시트와 맞지 않아 저장 못 했어요. 내 정보에서 확인해 주세요']:syncState==='wait'?['ng','인터넷이 연결되면 자동으로 저장돼요. 기록은 폰에 있어요']:['','팀 시트에 저장 중...'];
+  el.className='sendr '+st[0];el.textContent=st[1]}
 function showClear(keys,lvUp,wrapped){
   clearInterval(tInt);document.getElementById('timer').hidden=true;
   const its=items(keys),[dn,tt]=prog(log,its);let vol=0;
@@ -550,10 +571,11 @@ function showClear(keys,lvUp,wrapped){
   ${wrapped?`<span class="lvup" style="background:var(--ok)">CYCLE ${cycle.n} 완주 · 다음 사이클은 부위마다 종목 ${SWAPS_PER_CYCLE}개가 새로 바뀌어요</span>`:''}
   ${lvUp?`<span class="lvup">LEVEL UP · LV ${lvUp}${TITLES.some(t=>t[0]===lvUp)?' · 새 칭호 '+titleOf(lvUp):''}</span>`:''}
   <div class="stats"><div class="t"><small>세트</small><b>${dn}/${tt}</b></div><div class="t"><small>총 볼륨</small><b>${vol?Math.round(vol).toLocaleString():'-'}</b>${vol?'<em>kg</em>':''}</div><div class="t"><small>획득</small><b>+${xp}</b><em>XP</em></div></div>
+  ${syncOn()?`<p class="sendr" id="csync"></p>`:''}
   <button class="btn gold" type="button" id="ccopy">${sentLabel()}</button><button class="btn ghost" type="button" id="cclose">닫기</button></div>`;
   document.getElementById('cclose').onclick=()=>{o.hidden=true;o.innerHTML=''};
   document.getElementById('ccopy').onclick=()=>finishDay();
-  confetti(document.getElementById('cf'));
+  paintClearSync();confetti(document.getElementById('cf'));
 }
 function confetti(cv){
   if(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)return;
@@ -639,7 +661,7 @@ function lookEditor(){const L=draftLook;
     <input type="range" min="1" max="30" value="${previewLv}" id="lklv" aria-label="미리볼 레벨">
     <p class="small" style="margin:0">밀어서 LV 30까지 어떻게 변하는지 보세요</p></div></div>
   <div class="grow" id="lkgrow"></div>
-  <small class="lk-h">시작 체형 · 처음엔 다들 이래요</small>
+  <small class="lk-h">시작 체형 · 지금의 나와 비슷한 걸 골라요</small>
   <div class="bodies">${Object.entries(BODIES).map(([k,b])=>`<button type="button" class="bodyb${L.body===k?' on':''}" data-lk="body" data-v="${k}"><span class="bthumb">${charSVG(0,0,Object.assign({},L,{body:k}))}</span><span><b>${b.n}</b><small>${b.d}</small></span></button>`).join('')}</div>
   <small class="lk-h">머리 모양</small><div class="ctypes">${HAIRS.map(([k,n])=>`<button type="button" class="ct${L.hair===k?' on':''}" data-lk="hair" data-v="${k}">${n}</button>`).join('')}</div>
   <div class="lk-row"><div><small class="lk-h">피부</small><div class="sws">${sw(SKINS,'skin',v=>v[1])}</div></div><div><small class="lk-h">머리 색</small><div class="sws">${sw(HAIRC,'hairc',v=>v[0])}</div></div></div>
