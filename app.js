@@ -844,7 +844,7 @@ function bindTeam(){const $=id=>document.getElementById(id);
   if($('t-send'))$('t-send').onclick=async()=>{const t=$('t-coach').value.trim();if(!t){toast('Claude 답을 먼저 붙여넣어 주세요');return}
     const b=$('t-send');b.disabled=true;b.textContent='보내는 중...';
     try{const j=await syncPost({action:'coachadd',admin:store.get('pt-admin',''),text:t});teamDraft='';$('t-coach').value='';
-      toast(j.unverified?'보냈어요. 시트 코칭 탭에서 확인해 주세요':`${j.added}명에게 코칭을 보냈어요`)}
+      toast(j.unverified?'보냈어요. 시트 코칭 탭에서 확인해 주세요':`${j.added}명에게 코칭을 보냈어요${(j.skipped||[]).length?` · 없는 이름 제외: ${j.skipped.join(', ')}`:''}`)}
     catch(e){toast(e.message||'보내지 못했어요')}b.disabled=false;b.textContent='회원들에게 코칭 보내기'};
   if($('t-out'))$('t-out').onclick=()=>{store.set('pt-admin','');team=null;teamErr='';render(true)};
   if(store.get('pt-admin','')&&!team&&!teamErr)loadTeam()}
