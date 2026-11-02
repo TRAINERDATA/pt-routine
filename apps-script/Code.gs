@@ -60,6 +60,7 @@ function handle(req) {
   if (req.action === 'status') return status(req);
   if (req.action === 'weekly') return weekly(req);
   if (req.action === 'coachadd') return coachAdd(req);
+  if (req.action === 'delmember') return delMember(req);
   if (req.action === 'check') { const a = auth(req, false); return a.error ? {ok: false, error: a.error} : {ok: true}; }
   return {ok: false, error: '알 수 없는 요청'};
 }
@@ -336,4 +337,19 @@ function coachAdd(req) {
   if (head.length < COACH_HEAD.length || head[COACH_HEAD.length - 1] !== COACH_HEAD[COACH_HEAD.length - 1]) sh.getRange(1, 1, 1, COACH_HEAD.length).setValues([COACH_HEAD]);
   sh.getRange(sh.getLastRow() + 1, 1, rows.length, COACH_HEAD.length).setValues(rows);
   return {ok: true, added: rows.length, names: rows.map(r => r[0]), skipped: skipped};
+}
+
+/* trainer app: remove a member (test accounts etc.) from every tab */
+function delMember(req) {
+  const err = adminError(req);
+  if (err) return {ok: false, error: err};
+  const name = String(req.target || '').trim();
+  if (!name) return {ok: false, error: '지울 회원 이름이 없어요'};
+  let n = 0;
+  [['회원', MEM_HEAD], ['기록', LOG_HEAD], ['원본', RAW_HEAD], ['코칭', COACH_HEAD]].forEach(([tab, head]) => {
+    const sh = sheet(tab, head), rows = sh.getDataRange().getValues();
+    for (let r = rows.length - 1; r >= 1; r--) if (String(rows[r][0]).trim() === name) { sh.deleteRow(r + 1); n++; }
+  });
+  writeStatus();
+  return n ? {ok: true, removed: n} : {ok: false, error: '그 이름의 회원이 없어요'};
 }

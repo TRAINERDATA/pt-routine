@@ -854,7 +854,7 @@ function renderTeam(){const pin=store.get('pt-admin','');
   <button class="btn ghost" type="button" id="t-send">회원들에게 코칭 보내기</button></div>
   <div class="panel"><div class="row"><h3>회원별</h3><span class="sp"></span><span class="small">${esc(ago(team.at))} 기준</span></div><div class="hist">
   ${R.map(r=>`<div class="hrow" style="cursor:default"><b>${esc(r[0])}</b><span>${r[1]?`<span style="color:var(--ok)">● 오늘 ${esc(r[1])}</span>`:'<span class="muted">오늘 기록 없음</span>'}</span><span class="w">${+r[2]||0}/${WEEK_GOAL}</span>
-    <span class="s2">최근 운동 ${r[3]?md(String(r[3])):'-'}${r[4]?' · '+esc(r[4])+'kg':''} · 저장 ${esc(ago(r[5]))}</span></div>`).join('')||'<p class="small">아직 가입한 회원이 없어요</p>'}</div></div>
+    <span class="s2">최근 운동 ${r[3]?md(String(r[3])):'-'}${r[4]?' · '+esc(r[4])+'kg':''} · 저장 ${esc(ago(r[5]))}</span><button type="button" class="tdel" data-del="${esc(r[0])}">삭제</button></div>`).join('')||'<p class="small">아직 가입한 회원이 없어요</p>'}</div></div>
   <div class="row" style="gap:8px"><button class="btn ghost" type="button" id="t-re">새로고침</button><button class="btn ghost" type="button" id="t-out">PIN 지우기</button></div>
   <p class="small" style="margin:0">"이번 주"는 월요일부터 센 운동 완료 횟수예요. 같은 표가 구글 시트 "현황" 탭에도 있어요.</p></div>`}
 async function loadTeam(){const pin=store.get('pt-admin','');if(!pin||teamBusy)return;teamBusy=true;
@@ -865,6 +865,11 @@ function bindTeam(){const $=id=>document.getElementById(id);
   document.querySelectorAll('#view [data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
   if($('t-ok'))$('t-ok').onclick=()=>{const v=$('t-pin').value.trim();if(!v){toast('관리자 PIN을 넣어주세요');return}store.set('pt-admin',v);teamErr='';team=null;render(true);loadTeam()};
   if($('t-re'))$('t-re').onclick=()=>{teamErr='';team=null;render(true);loadTeam()};
+  document.querySelectorAll('[data-del]').forEach(b=>{let arm=false;b.onclick=async()=>{const n=b.dataset.del;
+    if(!arm){arm=true;b.textContent='한 번 더 누르면 삭제';b.classList.add('on');setTimeout(()=>{arm=false;if(b.isConnected){b.textContent='삭제';b.classList.remove('on')}},3000);return}
+    b.disabled=true;b.textContent='지우는 중...';
+    try{await syncPost({action:'delmember',admin:store.get('pt-admin',''),target:n});toast(n+' 회원을 삭제했어요');team=null;render(true);loadTeam()}
+    catch(e){toast(e.message||'삭제하지 못했어요');b.disabled=false;b.textContent='삭제'}}});
   if($('t-copy'))$('t-copy').onclick=()=>{if(!team||!team.weekly){toast('아직 불러오는 중이에요');return}copyText(team.weekly.text)};
   if($('t-coach'))$('t-coach').oninput=e=>{teamDraft=e.target.value};
   if($('t-send'))$('t-send').onclick=async()=>{const t=$('t-coach').value.trim();if(!t){toast('Claude 답을 먼저 붙여넣어 주세요');return}
