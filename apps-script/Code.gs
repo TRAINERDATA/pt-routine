@@ -58,6 +58,8 @@ function handle(req) {
   if (req.action === 'load') return load(req);
   if (req.action === 'coach') return coach(req);
   if (req.action === 'status') return status(req);
+  if (req.action === 'weekly') return weekly(req);
+  if (req.action === 'coachadd') return coachAdd(req);
   if (req.action === 'check') { const a = auth(req, false); return a.error ? {ok: false, error: a.error} : {ok: true}; }
   return {ok: false, error: '알 수 없는 요청'};
 }
@@ -195,7 +197,7 @@ function onOpen() {
 }
 
 /* builds one cell with instructions + the last 7 days of every member, ready to paste into Claude */
-function weeklyPrompt() {
+function buildWeekly() {
   const tz = 'Asia/Seoul', fmt = d => Utilities.formatDate(d, tz, 'yyyy-MM-dd');
   const today = new Date(), from = new Date(today.getTime() - 6 * 864e5);
   const next = new Date(today.getTime());
@@ -233,11 +235,16 @@ function weeklyPrompt() {
     '## 회원 기록',
     lines.join('\n')
   ].join('\n');
+  return {text: text, members: mem.length, days: logs.length};
+}
+
+function weeklyPrompt() {
+  const w = buildWeekly();
   const sh = sheet('Claude 요약', ['아래 A2 칸을 복사해서 Claude에게 붙여넣으세요. 답으로 받은 코드 블록 내용은 "코칭" 탭 첫 빈 줄의 A칸에 붙여넣으면 회원 앱에 떠요']);
-  sh.getRange(2, 1).setValue(text);
+  sh.getRange(2, 1).setValue(w.text);
   SpreadsheetApp.getActive().setActiveSheet(sh);
-  try { SpreadsheetApp.getUi().alert('"Claude 요약" 탭의 A2 칸을 복사해서 Claude에게 붙여넣으세요. (회원 ' + mem.length + '명, ' + logs.length + '일치 기록)'); } catch (e) {}
-  return text;
+  try { SpreadsheetApp.getUi().alert('"Claude 요약" 탭의 A2 칸을 복사해서 Claude에게 붙여넣으세요. (회원 ' + w.members + '명, ' + w.days + '일치 기록)'); } catch (e) {}
+  return w.text;
 }
 
 /* ---------- 현황 (team status) ---------- */
@@ -279,9 +286,34 @@ function writeStatus() {
   } catch (err) {}
 }
 
-function status(req) {
+function adminError(req) {
   const pin = adminPin();
-  if (!pin) return {ok: false, error: '시트의 "설정" 탭 B2 칸에 관리자 PIN을 먼저 적어주세요'};
-  if (String(req.admin || '').trim() !== pin) return {ok: false, error: '관리자 PIN이 맞지 않아요'};
+  if (!pin) return '시트의 "설정" 탭 B2 칸에 관리자 PIN을 먼저 적어주세요';
+  if (String(req.admin || '').trim() !== pin) return '관리자 PIN이 맞지 않아요';
+  return '';
+}
+
+function status(req) {
+  const err = adminError(req);
+  if (err) return {ok: false, error: err};
   return {ok: true, head: STATUS_HEAD, rows: statusRows(), at: now()};
+}
+
+/* trainer app: one tap copies every member's week for Claude */
+function weekly(req) {
+  const err = adminError(req);
+  if (err) return {ok: false, error: err};
+  const w = buildWeekly();
+  return {ok: true, text: w.text, members: w.members, days: w.days};
+}
+
+/* trainer app: Claude's answer pasted in the app goes straight into the 코칭 tab, one row per member */
+function coachAdd(req) {
+  const err = adminError(req);
+  if (err) return {ok: false, error: err};
+  const rows = splitCoach(req.text || '');
+  if (!rows.length) return {ok: false, error: '코칭 줄을 찾지 못했어요. Claude 답의 코드 블록 안 내용을 그대로 붙여넣어 주세요'};
+  const sh = sheet('코칭', COACH_HEAD);
+  sh.getRange(sh.getLastRow() + 1, 1, rows.length, COACH_HEAD.length).setValues(rows);
+  return {ok: true, added: rows.length, names: rows.map(r => r[0])};
 }

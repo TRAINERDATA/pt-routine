@@ -45,6 +45,7 @@ async function syncPost(body){
 async function syncFallback(body){
   if(body.action==='save'){await fetch(SYNC_URL,{method:'POST',mode:'no-cors',body:JSON.stringify(body),credentials:'omit'});
     try{return syncCheck(await jsonp({action:'check',name:body.name,pin:body.pin}))}catch(e){if(e.auth)throw e;return {ok:true,unverified:true}}}
+  if(body.action==='coachadd'){await fetch(SYNC_URL,{method:'POST',mode:'no-cors',body:JSON.stringify(body),credentials:'omit'});return {ok:true,unverified:true}}
   return syncCheck(await jsonp(body))}
 let jsonpN=0;
 function jsonp(body){return new Promise((ok,bad)=>{const cb='__ptcb'+(++jsonpN)+'_'+Date.now(),sc=document.createElement('script');
@@ -59,6 +60,7 @@ function sheetRow(lg){
   Object.keys(BASE).forEach(k=>Object.entries(lg[k]||{}).forEach(([i,st])=>{const n=(st.sets||[]).filter(Boolean).length;sets+=n;
     if(n||st.kg||st.memo)det.push(`${st.n||(BASE[k].ex[i]||{}).n} ${st.kg||'?'} ${n}세트${st.memo?' ('+st.memo+')':''}`)}));
   const dk=doneKeys(lg);if(dk.length)parts.push(dk.map(x=>DAYS[x].name).join('+'));else if(workoutKey(lg).length)parts.push(workoutKey(lg).map(x=>DAYS[x].name+' 진행').join('+'));
+  if(lg.mode&&parts.length)parts.push(modeTxt(lg.mode));
   if(lg.cardio)parts.push(`유산소 ${lg.cardio.t} ${cardioTxt(lg.cardio)}`);if(lg.pass&&!parts.length)parts.push('휴식');
   const [kc,pr]=totals(lg),info=lg.info||{};
   const meal=MEALS.filter(m=>m.id).map(m=>{const j=(lg.meals||{})[m.id],memo=(lg.memo||{})[m.id];const pick=j!=null&&m.o[j]?m.o[j][0]:'';return pick||memo?`${m.t.replace(/^[①②③]\s*/,'').split(' ')[0]}: ${pick}${memo?' / '+memo:''}`:''}).filter(Boolean).join(' · ');
@@ -190,12 +192,23 @@ function openWheel(name,w,r,done){
   sh.querySelector('.sbg').onclick=close;sh.querySelector('.sx').onclick=close;
   sh.querySelector('.sok').onclick=()=>{done(W_LIST[sel[0]],R_LIST[sel[1]]);close()};
 }
-function wr(k,i,e,st,L){const own=parseKg(st&&st.kg)||bodyKg(st&&st.kg);if(own)return own;const rc=recommend(k,i,e);if(rc)return [rc.w,rc.r];const w=String(e.kg).match(/(\d+(?:\.\d+)?)/);const r=String(e.r).match(/(\d+)/);return [w?+w[1]:0,r?+r[1]:10]}
+function wr(k,i,e,st,L){const own=parseKg(st&&st.kg)||bodyKg(st&&st.kg);if(own)return own;const t=recToday(k,i,e);return [t.w,t.r]}
+const MODES={c:[['good','좋아요','💪',1.025],['ok','보통','🙂',1],['low','별로','😮‍💨',.9]],s:[['heavy','고중량·저반복','🏋️'],['base','기본','⚖️'],['light','저중량·고반복','🔁']]};
+function modeTxt(m){const c=MODES.c.find(x=>x[0]===m.c)||MODES.c[1],s=MODES.s.find(x=>x[0]===m.s)||MODES.s[1];return `컨디션 ${c[1]}·${s[1]}`}
+function applyMode(w,r,e){const m=log.mode;if(!m)return [w,r,''];const db=/^한 손/.test(e.kg)||(e.w&&e.w[2]==='db'),step=db?2:2.5,[lo,hi]=repRange(e.r),note=[];
+  const c=MODES.c.find(x=>x[0]===m.c);if(w&&c&&c[3]!==1){w=rnd(w*c[3],step);note.push(m.c==='good'?'컨디션 좋음 +2.5%':'컨디션 별로 -10%')}
+  if(m.s==='heavy'){if(w)w=rnd(w*1.1,step);r=Math.max(3,lo-2);note.push('고중량·저반복')}
+  else if(m.s==='light'){if(w)w=rnd(w*.8,step);r=hi+3;note.push('저중량·고반복')}
+  return [w,r,note.join(' · ')]}
+/* today's suggestion: history-based recommendation (or start weight), then today's condition and style */
+function recToday(k,i,e){const rc=recommend(k,i,e);let w,r,why='';
+  if(rc){w=rc.w;r=rc.r;why=rc.why}else{const m=String(e.kg).match(/(\d+(?:\.\d+)?)/),rr=String(e.r).match(/(\d+)/);w=m?+m[1]:0;r=rr?+rr[1]:10}
+  const [w2,r2,note]=applyMode(w,r,e);return {w:w2,r:r2,why:[why,note].filter(Boolean).join(' · ')}}
 function bodyKg(s){const m=String(s||'').match(/맨몸\s*[x×*X]\s*(\d+)/);return m?[0,+m[1]]:null}
 function fmtWR(w,r){return `${w?w:'맨몸'}x${r}`}
 function parseKg(s){const m=String(s||'').replace(/kg/gi,'').match(/(\d+(?:\.\d+)?)\s*[x×*X]\s*(\d+)/);return m?[+m[1],+m[2]]:null}
 function guideOf(e){return GN[e.n]||e.g||null}
-function effEx(k,i,e,st){return st&&st.sw&&e.alt?Object.assign({},e,{n:e.alt,alt:e.n,g:null,why:'대체 운동'}):e}
+function effEx(k,i,e,st){return isSw(e,st)&&e.alt?Object.assign({},e,{n:e.alt,alt:e.n,g:null,why:'대체 운동'}):e}
 /* past entries for an exercise by name, newest first (same exercise can sit on different days/slots) */
 function hist(name,max){const out=[];for(const d of allDates()){if(d===today)continue;const lg=store.get('pt-log-'+d,{});
   Object.keys(BASE).forEach(k=>Object.entries(lg[k]||{}).forEach(([i,st])=>{if(st&&st.kg&&(st.n||(BASE[k].ex[i]||{}).n)===name)out.push({d,kg:st.kg,n:(st.sets||[]).filter(Boolean).length})}));
@@ -224,22 +237,31 @@ async function copyText(txt){
 }
 /* items of a session: one day = all exercises; two days = first 4 of each (main lifts first) */
 function items(keys){
-  if(keys.length===1)return DAYS[keys[0]].ex.map((e,i)=>({k:keys[0],i,e})).filter(x=>!x.e.off);
-  return keys.flatMap(k=>DAYS[k].ex.map((e,i)=>({k,i,e})).filter(x=>!x.e.off).slice(0,4));
+  if(keys.length===1)return DAYS[keys[0]].ex.map((e,i)=>({k:keys[0],i,e})).filter(x=>!x.e.off&&!isHidden(x.e));
+  return keys.flatMap(k=>DAYS[k].ex.map((e,i)=>({k,i,e})).filter(x=>!x.e.off&&!isHidden(x.e)).slice(0,4));
 }
-function prog(lg,its){let t=0,d=0;its.forEach(({k,i,e})=>{t+=e.s;d+=Math.min(e.s,setsDone(lg,k,i))});return [d,t]}
+function prog(lg,its){let t=0,d=0;its.forEach(({k,i,e})=>{const n=e.s+extraOf(lg,k,i);t+=n;d+=Math.min(n,setsDone(lg,k,i))});return [d,t]}
+function extraOf(lg,k,i){return ((lg[k]&&lg[k][i])||{}).x||0}
+/* exercises a member removed for themselves (by name, kept in the synced profile) */
+function isHidden(e){return !!(PROF&&PROF.hide&&PROF.hide.includes(e.n))}
+/* a member's alternative choice sticks: switched once, it stays switched next time */
+function isSw(e,st){return st&&st.sw!=null?!!st.sw:!!(PROF&&PROF.prefer&&e.alt&&PROF.prefer[e.n]===e.alt)}
 function sname(keys){return keys.map(k=>DAYS[k].name).join(' + ')}
 
 /* ---------- rest timer ---------- */
+const CHEERS=['숨 고르는 중...','물 한 모금 어때요?','다음 세트도 할 수 있어요!','자세 한 번 더 생각하기','거의 다 쉬었어요'];
 let tInt;
 function startTimer(sec,label){
   const el=document.getElementById('timer');clearInterval(tInt);
   const end=Date.now()+sec*1000;el.hidden=false;el.className='timer';
-  el.innerHTML=`<b id="tt"></b><div class="tl"><span id="tlab">휴식 · ${esc(label)}</span><div class="tbar"><i id="tb"></i></div></div><button type="button" id="tskip">건너뛰기</button>`;
+  const C=2*Math.PI*19,lv=lvOf(totalXP()),mm=Math.min(1,(lv-1)/29);let fr=0;
+  el.innerHTML=`<span class="tmini" id="tmini">${charSVG(mm,0,prof().look)}</span><span class="tring"><svg viewBox="0 0 44 44"><circle class="tbg" cx="22" cy="22" r="19"/><circle class="tfg" id="tfg" cx="22" cy="22" r="19" stroke-dasharray="${C}" stroke-dashoffset="0"/><circle class="tsp" cx="22" cy="22" r="21.5"/></svg><b id="tt"></b></span><div class="tl"><span id="tlab">휴식 · ${esc(label)}</span><span class="tcheer" id="tcheer">숨 고르는 중...</span></div><button type="button" id="tskip">건너뛰기</button>`;
   document.getElementById('tskip').onclick=()=>{clearInterval(tInt);el.hidden=true};
   const tick=()=>{const left=Math.max(0,Math.round((end-Date.now())/1000));
     document.getElementById('tt').textContent=`${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}`;
-    document.getElementById('tb').style.width=(left/sec*100)+'%';
+    document.getElementById('tfg').style.strokeDashoffset=String(C*(1-left/sec));
+    if(++fr%3===0){const mi=document.getElementById('tmini');if(mi)mi.innerHTML=charSVG(mm,(fr/3)%2?1:0,prof().look)}
+    if(fr%16===0){const ch=document.getElementById('tcheer');if(ch)ch.textContent=CHEERS[(fr/16)%CHEERS.length]}
     if(left<=0){clearInterval(tInt);el.className='timer go';document.getElementById('tt').textContent='GO';document.getElementById('tlab').textContent='다음 세트 시작';setTimeout(()=>{if(el.className==='timer go')el.hidden=true},6000)}};
   tick();tInt=setInterval(tick,250);
 }
@@ -505,6 +527,13 @@ function wuList(keys){const out=[],seen=new Set();keys.forEach(k=>(WU[k]||[]).fo
 function warmCard(keys){const L=wuList(keys),d=log.wu||{},n=L.filter(x=>d[x.id]).length,all=n===L.length;
   return `<details class="panel wu"${all?'':' open'}><summary class="wus"><span>준비운동 · 약 7분</span><span class="small">${n} / ${L.length}${all?' ✓':''}</span></summary>
   ${L.map(({id,w})=>`<button type="button" class="q${d[id]?' on':''}" data-wu="${id}"><span class="box">${d[id]?'✓':''}</span><span class="qt"><em class="tool">${w[0]}</em>${esc(w[1])}</span><span class="xpv">${w[2]}</span></button>`).join('')}</details>`}
+let modeEdit=false,draftMode=null;
+function modePanel(){const d=draftMode||(draftMode=Object.assign({c:'ok',s:'base'},log.mode||{}));
+  const opt=(list,key)=>list.map(([v,l,ic])=>`<button type="button" class="mo${d[key]===v?' on':''}" data-m${key}="${v}"><i>${ic}</i>${l}</button>`).join('');
+  return `<div class="panel modep"><h3>오늘 컨디션은 어때요?</h3><div class="mopts">${opt(MODES.c,'c')}</div>
+  <h3>오늘은 어떻게 할까요?</h3><div class="mopts">${opt(MODES.s,'s')}</div>
+  <p class="small" style="margin:0">고른 대로 오늘 추천 무게·횟수가 바뀌어요. 컨디션 별로면 10% 가볍게, 고중량이면 무겁게 적게, 저중량이면 가볍게 많이.</p>
+  <button class="btn gold" type="button" id="mgo">이대로 운동 시작</button></div>`}
 function renderTrain(){
   const keys=session,its=items(keys),[dn,tt]=prog(log,its),done=keys.every(k=>(log.done||{})[k]);
   const nx=nextDay();
@@ -512,25 +541,31 @@ function renderTrain(){
   let html=`<div class="sec"><div class="row"><span class="eyebrow">${comboMode?'2부위 같이 · 두 개 고르기':'부위 고르기'}</span><span class="sp"></span><button type="button" class="toggle${comboMode?' on':''}" id="combo" aria-pressed="${comboMode}">2부위 같이</button></div>
   <div class="days" role="tablist">${chips}</div>
   <section class="hero" style="--c:${col(keys[0])}"><div class="row"><div style="flex:1;min-width:0"><span class="tag">${keys.map(k=>DAYS[k].tag).join(' + ')}</span><h2>${sname(keys)}</h2><p>${keys.length>1?'친구랑 모드: 부위별 메인 4종목씩 묶었어요. 두 부위 모두 완료 처리돼요.':keys[0]===nx?'순서대로 오늘 할 차례예요.':`순서와 다르게 해도 OK. 이걸 하면 체크되고, 다음엔 ${DAYS[nx].name}부터 이어서 해요.`}</p></div>${ring(tt?dn/tt:0,done?'✓':`${dn}/${tt}`)}</div></section>`;
+  const anyDone=its.some(x=>setsDone(log,x.k,x.i)>0);
+  if((!log.mode&&!anyDone)||modeEdit)return html+modePanel()+'</div>';
+  html+=`<button type="button" class="modechip" id="mchg">${esc(modeTxt(log.mode||{}))} <span>바꾸기</span></button>`;
   html+=warmCard(keys);
   its.forEach(({k,i,e},n)=>{
-    const st=(log[k]&&log[k][i])||{sets:[],kg:''},sd=setsDone(log,k,i);e=effEx(k,i,e,st);const L=lastFor(k,i,e.n);
-    html+=`<article class="ex${sd>=e.s?' complete':''}" data-k="${k}" data-i="${i}" style="--c:${col(k)}">
-    <div class="top"><span class="num">${sd>=e.s?'✓':n+1}</span><div style="min-width:0"><h3>${esc(e.n)}</h3>${keys.length>1?`<span class="why">${DAYS[k].name}</span> `:''}${e.isNew&&!st.sw?`<span class="why" style="color:var(--ok)">NEW · 이번 사이클 </span>`:''}${e.coach&&!st.sw?`<span class="why" style="color:var(--ok)">트레이너 교체 </span>`:''}${e.why?`<span class="why">${esc(e.why)}</span>`:''}</div><span class="kg">${esc(e.kg)}<small>시작 무게</small></span></div>
-    <div class="meta"><span><b>${e.s}×${esc(e.r)}</b></span><span>RIR <b>${esc(e.rir)}</b></span><span>휴식 <b>${esc(e.rest)}</b></span></div>
-    ${(()=>{const rc=recommend(k,i,e);if(!L&&!rc)return '';return `<div class="last">${L?`지난번 ${md(L.d)} <b>${esc(L.kg)}</b> · ${L.n}세트`:''}${rc?`${L?' → ':''}오늘 추천 <b>${esc(fmtWR(rc.w,rc.r))}</b><br>${esc(rc.why)}`:''}</div>`})()}
-    <div class="sets">${Array.from({length:e.s},(_,j)=>`<button type="button" class="s${st.sets[j]?' on':''}" data-j="${j}" aria-pressed="${!!st.sets[j]}" aria-label="${j+1}세트">${j+1}</button>`).join('')}
-</div>
+    const st=(log[k]&&log[k][i])||{sets:[],kg:''},sd=setsDone(log,k,i),sw=isSw(e,st);e=effEx(k,i,e,st);const L=lastFor(k,i,e.n),ns=e.s+(st.x||0);
+    html+=`<article class="ex${sd>=ns?' complete':''}" data-k="${k}" data-i="${i}" style="--c:${col(k)}">
+    <div class="top"><span class="num">${sd>=ns?'✓':n+1}</span><div style="min-width:0"><h3>${esc(e.n)}</h3>${keys.length>1?`<span class="why">${DAYS[k].name}</span> `:''}${e.isNew&&!sw?`<span class="why" style="color:var(--ok)">NEW · 이번 사이클 </span>`:''}${e.coach&&!sw?`<span class="why" style="color:var(--ok)">트레이너 교체 </span>`:''}${e.why?`<span class="why">${esc(e.why)}</span>`:''}</div><span class="kg">${esc(e.kg)}<small>시작 무게</small></span></div>
+    <div class="meta"><span><b>${ns}×${esc(e.r)}</b></span><span>RIR <b>${esc(e.rir)}</b></span><span>휴식 <b>${esc(e.rest)}</b></span></div>
+    ${(()=>{const rc=recToday(k,i,e);if(!L&&!rc.why)return '';return `<div class="last">${L?`지난번 ${md(L.d)} <b>${esc(L.kg)}</b> · ${L.n}세트`:''}${rc.why?`${L?' → ':''}오늘 추천 <b>${esc(fmtWR(rc.w,rc.r))}</b><br>${esc(rc.why)}`:''}</div>`})()}
+    <div class="sets">${Array.from({length:ns},(_,j)=>`<button type="button" class="s${st.sets[j]?' on':''}" data-j="${j}" aria-pressed="${!!st.sets[j]}" aria-label="${j+1}세트">${j+1}</button>`).join('')}<button type="button" class="sadd" aria-label="세트 추가">+</button>${st.x?`<button type="button" class="sadd ssub" aria-label="추가 세트 빼기">−</button>`:''}</div>
     ${(()=>{const [w,r]=wr(k,i,e,st,L);return `<button type="button" class="wr" aria-label="${esc(e.n)} 무게와 횟수 바꾸기"><span class="wl">무게</span><b>${w?w+'<small>kg</small>':'맨몸'}</b><span class="wx">×</span><b>${r}<small>회</small></b><span class="wh">눌러서 변경</span></button>`})()}
     <div class="exm"><button type="button" class="memob${st.memo?' has':''}" aria-expanded="false">✎ 메모${st.memo?' ·':''}</button><input class="memoin" id="exmemo-${k}-${i}" ${st.memo?'':'hidden'} placeholder="예) 3세트째 어깨 찌릿, 그립 좁게" value="${esc(st.memo||'')}"></div>
-    <button type="button" class="altb">${st.sw?'원래 종목으로':'대체 운동으로'} <b>${esc(e.alt)}</b> <span>⇄</span></button>
-    ${guideOf(e)?`<details><summary>자세 보기</summary><ul class="guide">${Object.entries(guideOf(e)).map(([a,b])=>`<li><span>${a}</span>${esc(b)}</li>`).join('')}</ul></details>`:''}
+    <div class="exa"><button type="button" class="altb">${sw?'원래 종목으로':'대체 운동으로'} <b>${esc(e.alt)}</b> <span>⇄</span></button><button type="button" class="hideb">이 종목 빼기</button></div>
+    <details><summary>자세 보기</summary>${guideOf(e)?`<ul class="guide">${Object.entries(guideOf(e)).map(([a,b])=>`<li><span>${a}</span>${esc(b)}</li>`).join('')}</ul>`:''}<a class="yt" href="https://www.youtube.com/results?search_query=${encodeURIComponent(e.n.replace(/\s*\(.*?\)/g,'')+' 자세')}" target="_blank" rel="noopener">▶ 영상으로 자세 보기</a></details>
     </article>`;
   });
   html+=`<button class="btn ${done?'done':'gold'}" type="button" id="finish" style="padding:18px;font-size:17px">${done?'퀘스트 클리어 ✓ · 결과 다시 보기':`운동 완료 · 퀘스트 클리어 (${dn}/${tt})`}</button></div>`;
   return html;
 }
 function bindTrain(v){
+  v.querySelectorAll('[data-mc]').forEach(b=>b.onclick=()=>{draftMode.c=b.dataset.mc;v.querySelectorAll('[data-mc]').forEach(x=>x.classList.toggle('on',x===b))});
+  v.querySelectorAll('[data-ms]').forEach(b=>b.onclick=()=>{draftMode.s=b.dataset.ms;v.querySelectorAll('[data-ms]').forEach(x=>x.classList.toggle('on',x===b))});
+  if(document.getElementById('mgo'))document.getElementById('mgo').onclick=()=>{log.mode=Object.assign({},draftMode);draftMode=null;modeEdit=false;save();toast(modeTxt(log.mode)+' · 화이팅!');render(true)};
+  if(document.getElementById('mchg'))document.getElementById('mchg').onclick=()=>{modeEdit=true;draftMode=null;render(true);window.scrollTo({top:0})};
   v.querySelectorAll('[data-wu]').forEach(b=>b.onclick=()=>{log.wu=log.wu||{};const id=b.dataset.wu;log.wu[id]=!log.wu[id];save();render(true)});
   document.getElementById('combo').onclick=()=>{comboMode=!comboMode;if(!comboMode)session=[session[0]];else toast('같이 할 두 번째 부위를 고르세요');render(true)};
   v.querySelectorAll('[data-day]').forEach(b=>b.onclick=()=>{const x=b.dataset.day;
@@ -540,15 +575,21 @@ function bindTrain(v){
     const k=art.dataset.k,i=+art.dataset.i,e=effEx(k,i,DAYS[k].ex[i],(log[k]||{})[i]);
     const get=()=>{log[k]=log[k]||{};log[k][i]=log[k][i]||{sets:[],kg:''};return log[k][i]};
     const mb=art.querySelector('.memob'),mi=art.querySelector('.memoin');mb.onclick=()=>{mi.hidden=!mi.hidden;if(!mi.hidden)mi.focus()};mi.oninput=()=>{const st=get();st.memo=mi.value;save();mb.classList.toggle('has',!!mi.value)};
-    art.querySelector('.altb').onclick=()=>{const st=get();st.sw=!st.sw;if(!(st.sets||[]).some(Boolean))st.kg='';st.n=st.sw?DAYS[k].ex[i].alt:DAYS[k].ex[i].n;save();toast(st.sw?'대체 운동으로 바꿨어요':'원래 종목으로 돌렸어요');render(true)};
+    art.querySelector('.altb').onclick=()=>{const st=get(),base=DAYS[k].ex[i];st.sw=!isSw(base,st);if(!(st.sets||[]).some(Boolean))st.kg='';st.n=st.sw?base.alt:base.n;save();
+      if(PROF){PROF.prefer=Object.assign({},PROF.prefer);if(st.sw)PROF.prefer[base.n]=base.alt;else delete PROF.prefer[base.n];store.set('pt-profile',PROF)}
+      toast(st.sw?'대체 운동으로 바꿨어요. 다음에도 이걸로 나와요':'원래 종목으로 돌렸어요');render(true)};
+    art.querySelector('.sadd:not(.ssub)').onclick=()=>{const st=get();st.x=(st.x||0)+1;save();toast('세트를 하나 추가했어요');render(true)};
+    if(art.querySelector('.ssub'))art.querySelector('.ssub').onclick=()=>{const st=get();if(!st.x)return;st.x--;st.sets=(st.sets||[]).slice(0,DAYS[k].ex[i].s+st.x);save();render(true)};
+    const hb=art.querySelector('.hideb');let harm=false;hb.onclick=()=>{if(!harm){harm=true;hb.textContent='한 번 더 누르면 빠져요';setTimeout(()=>{harm=false;if(hb.isConnected)hb.textContent='이 종목 빼기'},3000);return}
+      PROF=Object.assign({},PROF,{hide:[...new Set([...(PROF.hide||[]),DAYS[k].ex[i].n])]});store.set('pt-profile',PROF);toast('뺐어요. 내 정보에서 되돌릴 수 있어요');render(true)};
     art.querySelectorAll('button.s').forEach(b=>b.onclick=()=>{
       const st=get(),j=+b.dataset.j;log.cn=log.cn||{};if(log.cn[k]==null)log.cn[k]=cycle.n;st.sets[j]=!st.sets[j];st.n=e.n;if(!st.kg){const [w,r]=wr(k,i,e,st,lastFor(k,i,e.n));st.kg=fmtWR(w,r)}save();
-      if(st.sets[j]){const n=setsDone(log,k,i);toast(n>=e.s?'+30 XP · 종목 클리어':'+10 XP');startTimer(restSec(e.rest),e.n)}
+      if(st.sets[j]){const n=setsDone(log,k,i);toast(n>=e.s+(st.x||0)?'+30 XP · 종목 클리어':'+10 XP');startTimer(restSec(e.rest),e.n)}
       render(true);const nb=document.querySelector(`.ex[data-k="${k}"][data-i="${i}"] button.s[data-j="${j}"]`);if(nb&&st.sets[j])nb.classList.add('pop')});
     art.querySelector('.wr').onclick=()=>{const st=get();const [w,r]=wr(k,i,e,st,lastFor(k,i,e.n));
       openWheel(e.n,w,r,(nw,nr)=>{const st=get();st.kg=fmtWR(nw,nr);st.n=e.n;save();const bs=art.querySelectorAll('.wr b');bs[0].innerHTML=nw?nw+'<small>kg</small>':'맨몸';bs[1].innerHTML=nr+'<small>회</small>'})};
   });
-  document.getElementById('finish').onclick=()=>{
+  if(document.getElementById('finish'))document.getElementById('finish').onclick=()=>{
     const keys=session,already=keys.every(k=>(log.done||{})[k]);
     const before=lvOf(totalXP());
     log.done=log.done||{};keys.forEach(k=>log.done[k]=true);delete log.pass;save();
@@ -723,6 +764,7 @@ function renderSet(){
   ${first&&SYNC_URL?`<div class="panel" style="margin-top:10px"><h3>이미 쓰던 기록이 있어요</h3><p class="small" style="margin:0">다른 폰이나 PC에서 쓰던 이름과 PIN을 넣으면 기록을 그대로 불러와요.</p>
   <div class="fields"><label for="r-name"><span>이름</span><input id="r-name" placeholder="예: 민수"></label><label for="r-pin"><span>PIN</span><input id="r-pin" inputmode="numeric" type="password" placeholder="숫자 4~8자리"></label></div>
   <button class="btn ghost" type="button" id="rload">기록 불러오기</button></div>`:''}
+  ${!first&&(p.hide||[]).length?`<div class="panel"><h3>뺀 종목</h3><p class="small" style="margin:0">운동 화면에서 뺀 종목이에요. 되돌리면 다시 나와요.</p>${p.hide.map(n=>`<div class="row"><span style="flex:1">${esc(n)}</span><button type="button" class="toggle" data-unhide="${esc(n)}">되돌리기</button></div>`).join('')}</div>`:''}
   ${first?'':`<div class="panel"><h3>백업 · 기기 옮기기</h3><p class="small" style="margin:0">${SYNC_URL?'기록은 팀 시트에도 자동 저장돼요. 새 기기에서는 처음 화면의 "기록 불러오기"를 쓰면 돼요. 백업 파일은 혹시 몰라 따로 보관하고 싶을 때 쓰세요.':'기록은 이 브라우저에만 있어요. 폰을 바꾸거나 브라우저 데이터를 지우기 전에 백업 파일을 받아두세요.'}</p>
   <div class="row" style="gap:8px"><button class="btn ghost" type="button" id="sexp">백업 받기</button><button class="btn ghost" type="button" id="simp">백업 불러오기</button></div><input type="file" id="sfile" accept="application/json,.json" hidden></div>
   <button class="btn ghost" type="button" id="swipe" style="padding:10px;font-size:13px">이 기기의 내 기록 전부 지우기</button>`}</div>`;
@@ -730,6 +772,7 @@ function renderSet(){
 let wipeArm=false;
 function bindSet(){
   const $=id=>document.getElementById(id);bindLook();
+  document.querySelectorAll('[data-unhide]').forEach(b=>b.onclick=()=>{PROF=Object.assign({},PROF,{hide:(PROF.hide||[]).filter(n=>n!==b.dataset.unhide)});store.set('pt-profile',PROF);toast('되돌렸어요');render(true)});
   bindRm();
   $('ssave').onclick=()=>{const num=v=>{const n=parseFloat(String(v).replace(',','.'));return n>0?n:''};
     const rm={};LIFTS.forEach(([k])=>rm[k]=num(document.querySelector(`[data-rm="${k}"]`).dataset.v));
@@ -737,7 +780,7 @@ function bindSet(){
     if(!name){toast('이름을 넣어 주세요');return}
     if(SYNC_URL&&!/^\d{4,8}$/.test(pin)){toast('PIN은 숫자 4~8자리로 정해 주세요');return}
     const old=PROF||{};
-    PROF={name,pin,look:draftLook,rm,kcal:num($('s-kcal').value)||DEFAULT_TARGETS.kcal,prot:num($('s-prot').value)||DEFAULT_TARGETS.prot};
+    PROF=Object.assign({},old,{name,pin,look:draftLook,rm,kcal:num($('s-kcal').value)||DEFAULT_TARGETS.kcal,prot:num($('s-prot').value)||DEFAULT_TARGETS.prot});
     store.set('pt-profile',PROF);
     /* new identity on the sheet: send everything this device already has */
     if(SYNC_URL&&(old.name!==name||old.pin!==pin))markAllPending();
@@ -765,7 +808,7 @@ function bindSet(){
 }
 
 /* ---------- TEAM (trainer only, admin PIN lives in the sheet's 설정 tab) ---------- */
-let team=null,teamErr='',teamBusy=false;
+let team=null,teamErr='',teamBusy=false,teamDraft='',teamWkErr='';
 function ago(t){const d=new Date(String(t).replace(' ','T')+'+09:00');if(isNaN(d))return t||'-';const m=Math.round((Date.now()-d)/6e4);
   return m<1?'방금':m<60?m+'분 전':m<1440?Math.round(m/60)+'시간 전':Math.round(m/1440)+'일 전'}
 function renderTeam(){const pin=store.get('pt-admin','');
@@ -779,6 +822,10 @@ function renderTeam(){const pin=store.get('pt-admin','');
   const R=team.rows,act=R.filter(r=>r[1]).length;
   return `<div class="sec">${head}
   <div class="stats"><div class="t"><small>회원</small><b>${R.length}</b><em>명</em></div><div class="t"><small>오늘 운동</small><b>${act}</b><em>명</em></div><div class="t"><small>이번 주 평균</small><b>${R.length?(R.reduce((a,r)=>a+(+r[2]||0),0)/R.length).toFixed(1):'-'}</b><em>회</em></div></div>
+  <div class="panel"><h3>주간 코칭</h3><p class="small" style="margin:0">① 전체 회원의 이번 주 기록을 복사해서 Claude에게 붙여넣어요. ② Claude가 준 코드 블록 내용을 아래에 붙여넣고 보내면, 회원마다 각자 앱에 코칭이 떠요.</p>
+  <button class="btn gold" type="button" id="t-copy">① 이번 주 전체 기록 복사 (Claude용)</button><span class="small" style="text-align:center">${team.weekly?`회원 ${team.weekly.members}명 · ${team.weekly.days}일치 기록`:teamWkErr?esc(teamWkErr):'불러오는 중...'}</span>
+  <textarea id="t-coach" placeholder="② Claude 답의 코드 블록 내용을 여기에 붙여넣기" style="min-height:110px">${esc(teamDraft)}</textarea>
+  <button class="btn ghost" type="button" id="t-send">회원들에게 코칭 보내기</button></div>
   <div class="panel"><div class="row"><h3>회원별</h3><span class="sp"></span><span class="small">${esc(ago(team.at))} 기준</span></div><div class="hist">
   ${R.map(r=>`<div class="hrow" style="cursor:default"><b>${esc(r[0])}</b><span>${r[1]?`<span style="color:var(--ok)">● 오늘 ${esc(r[1])}</span>`:'<span class="muted">오늘 기록 없음</span>'}</span><span class="w">${+r[2]||0}/${WEEK_GOAL}</span>
     <span class="s2">최근 운동 ${r[3]?md(String(r[3])):'-'}${r[4]?' · '+esc(r[4])+'kg':''} · 저장 ${esc(ago(r[5]))}</span></div>`).join('')||'<p class="small">아직 가입한 회원이 없어요</p>'}</div></div>
@@ -786,13 +833,31 @@ function renderTeam(){const pin=store.get('pt-admin','');
   <p class="small" style="margin:0">"이번 주"는 월요일부터 센 운동 완료 횟수예요. 같은 표가 구글 시트 "현황" 탭에도 있어요.</p></div>`}
 async function loadTeam(){const pin=store.get('pt-admin','');if(!pin||teamBusy)return;teamBusy=true;
   try{const j=await syncPost({action:'status',admin:pin});team=j;teamErr=''}catch(e){team=null;teamErr=e.message||'불러오지 못했어요'}
+  if(team){try{const w=await syncPost({action:'weekly',admin:pin});team.weekly=w;teamWkErr=''}catch(e){teamWkErr='주간 기록을 못 불러왔어요: '+(e.message||'')}}
   teamBusy=false;if(view==='team')render(true)}
 function bindTeam(){const $=id=>document.getElementById(id);
   document.querySelectorAll('#view [data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
   if($('t-ok'))$('t-ok').onclick=()=>{const v=$('t-pin').value.trim();if(!v){toast('관리자 PIN을 넣어주세요');return}store.set('pt-admin',v);teamErr='';team=null;render(true);loadTeam()};
   if($('t-re'))$('t-re').onclick=()=>{teamErr='';team=null;render(true);loadTeam()};
+  if($('t-copy'))$('t-copy').onclick=()=>{if(!team||!team.weekly){toast('아직 불러오는 중이에요');return}copyText(team.weekly.text)};
+  if($('t-coach'))$('t-coach').oninput=e=>{teamDraft=e.target.value};
+  if($('t-send'))$('t-send').onclick=async()=>{const t=$('t-coach').value.trim();if(!t){toast('Claude 답을 먼저 붙여넣어 주세요');return}
+    const b=$('t-send');b.disabled=true;b.textContent='보내는 중...';
+    try{const j=await syncPost({action:'coachadd',admin:store.get('pt-admin',''),text:t});teamDraft='';$('t-coach').value='';
+      toast(j.unverified?'보냈어요. 시트 코칭 탭에서 확인해 주세요':`${j.added}명에게 코칭을 보냈어요`)}
+    catch(e){toast(e.message||'보내지 못했어요')}b.disabled=false;b.textContent='회원들에게 코칭 보내기'};
   if($('t-out'))$('t-out').onclick=()=>{store.set('pt-admin','');team=null;teamErr='';render(true)};
   if(store.get('pt-admin','')&&!team&&!teamErr)loadTeam()}
+
+/* ---------- welcome splash: once every few hours when the app opens ---------- */
+function greet(){if(!PROF||view==='set')return;const last=+store.get('pt-hello',0);if(Date.now()-last<3*36e5)return;store.set('pt-hello',Date.now());
+  const x=totalXP(),lv=lvOf(x),m=Math.min(1,(lv-1)/29),done=doneKeys(log).length>0;
+  const lines=['오늘도 운동하러 가볼까요? 💪','어제의 나보다 한 걸음 더!','근육이 기다리고 있어요 🔥','물 한 잔 마시고 시작해요 💧','와줘서 고마워요! 오늘도 가볍게 시작해요'];
+  const plan=done?'오늘 운동은 끝! 식단만 챙겨요':log.cardio?'오늘은 유산소 완료!':`오늘은 ${DAYS[nextDay()].name} 차례예요`;
+  const o=document.createElement('div');o.className='hello';o.innerHTML=`<div class="hbuddy">${charSVG(m,Math.max(1,poseFor(lv)),PROF.look)}</div>
+  <p class="h1">환영해요, <b>${esc(PROF.name)}</b>님!</p><p class="h2">${lines[Math.floor(Math.random()*lines.length)]}</p>
+  <p class="h3">LV ${lv} · ${titleOf(lv)} · ${plan}</p><span class="h4">화면을 누르면 시작해요</span>`;
+  const close=()=>{if(!o.isConnected)return;o.classList.add('out');setTimeout(()=>o.remove(),350)};o.onclick=close;document.body.appendChild(o);setTimeout(close,2800)}
 
 /* ---------- render ---------- */
 function render(keepScroll){
@@ -809,4 +874,4 @@ function render(keepScroll){
 }
 if(!PROF)view='set';
 render();
-queueSync(0);fetchCoach();
+queueSync(0);fetchCoach();greet();

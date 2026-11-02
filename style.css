@@ -334,3 +334,39 @@ textarea{width:100%;min-height:160px;border-radius:4px;border:1px solid var(--li
 .wheels.one{grid-template-columns:1fr}
 .rms{display:grid;grid-template-columns:1fr;gap:8px}
 .rms .wr .wl{min-width:96px}
+
+/* workout mode chooser */
+.modep{gap:12px}.mopts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.mo{border:1px solid var(--line2);background:none;border-radius:14px;padding:12px 4px;color:var(--muted);font-weight:700;font-size:13px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;transition:transform .15s}
+.mo i{font-style:normal;font-size:24px}.mo.on{border-color:var(--sig);background:var(--sig-bg);color:var(--fg);transform:scale(1.03)}
+.modechip{align-self:flex-start;border:1px solid var(--line2);background:var(--card);color:var(--fg);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer}
+.modechip span{color:var(--sig);margin-left:6px}
+/* extra sets, actions, form video */
+.sets .sadd{width:42px;height:42px;border-radius:50%;border:2px dashed var(--line2);background:none;color:var(--muted);font-size:20px;font-weight:700;cursor:pointer}
+.sets .ssub{font-size:22px}
+.exa{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.hideb{border:0;background:none;color:var(--dim);font-size:12px;padding:6px 4px;cursor:pointer;margin-left:auto}
+.yt{display:inline-block;margin-top:12px;padding:8px 14px;border-radius:999px;background:#ff000022;color:#ff6b6b;font-size:13px;font-weight:700;text-decoration:none}
+/* rest timer with ring + mini character */
+.timer{gap:10px;padding:8px 10px 8px 12px}
+.timer .tmini{width:34px;height:44px;flex:0 0 auto}.timer .tmini .buddy{width:34px;height:44px}
+.timer .tring{position:relative;width:54px;height:54px;flex:0 0 auto;display:grid;place-items:center}
+.timer .tring svg{position:absolute;inset:0;width:54px;height:54px;transform:rotate(-90deg);overflow:visible}
+.timer .tring b{font-size:15px;min-width:0;position:relative}
+.tring .tbg{fill:none;stroke:rgba(0,0,0,.12);stroke-width:4}
+.tring .tfg{fill:none;stroke:var(--bg);stroke-width:4;stroke-linecap:round;transition:stroke-dashoffset .25s linear}
+.tring .tsp{fill:none;stroke:var(--sig);stroke-width:2.2;stroke-dasharray:3 8;stroke-linecap:round;transform-origin:22px 22px;animation:tspin 2.4s linear infinite}
+@keyframes tspin{to{transform:rotate(360deg)}}
+.timer .tcheer{display:block;font-size:12px;font-weight:700;color:#2a2a26;margin-top:2px}
+/* welcome splash */
+.hello{position:fixed;inset:0;z-index:90;background:radial-gradient(circle at 50% 38%,#1f1f1f,#0a0a0a 70%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;text-align:center;animation:hfade .3s;cursor:pointer}
+.hello.out{animation:hout .35s forwards}
+.hello .hbuddy{width:170px;height:212px;animation:hpop .7s cubic-bezier(.2,1.4,.4,1) both}.hello .hbuddy .buddy{width:170px;height:212px}
+.hello .h1{margin:6px 0 0;font-size:26px;font-weight:900;letter-spacing:-.03em;animation:hrise .5s .25s both}
+.hello .h1 b{color:var(--sig)}
+.hello .h2{margin:0;font-size:17px;font-weight:700;animation:hrise .5s .45s both}
+.hello .h3{margin:0;font-size:13px;color:var(--muted);animation:hrise .5s .6s both}
+.hello .h4{position:absolute;bottom:calc(30px + env(safe-area-inset-bottom,0px));font-size:12px;color:var(--dim);animation:hrise .5s 1s both}
+@keyframes hfade{from{opacity:0}}@keyframes hout{to{opacity:0;transform:scale(1.04)}}
+@keyframes hpop{0%{opacity:0;transform:translateY(40px) scale(.4)}60%{opacity:1;transform:translateY(-10px) scale(1.08)}80%{transform:translateY(3px) scale(.97)}100%{transform:none}}
+@keyframes hrise{from{opacity:0;transform:translateY(12px)}}
