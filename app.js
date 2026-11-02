@@ -12,7 +12,10 @@ function buildLog(date,lg){
 }
 
 const PLATE = {CH:'--p-red',BK:'--p-blue',SH:'--p-yellow',LG:'--p-green'};
-const ORDER = ['CH','BK','SH','LG'];
+const TEAM_ORDER = ['CH','BK','SH','LG'];
+/* the rotation in use: the team order, or a member's own routine (X1, X2, ...) from coaching */
+const ORDER = [...TEAM_ORDER];
+const XCOL = ['--p-violet','--p-blue','--p-green','--p-yellow','--p-red'];
 const WEEKDAY = ['일','월','화','수','목','금','토'];
 const XP_LV = 600;
 const CARDIO = ['수영','러닝','사이클','기타'];
@@ -91,7 +94,18 @@ function parseCoach(c){if(!c||!c.week)return null;const L=s=>String(s||'').split
   const w={};L(c.weights).forEach(x=>{const m=x.match(/^(.+?)\s*=\s*(.+)$/);if(!m)return;const v=parseKg(m[2])||bodyKg(m[2]);if(v)w[m[1].trim()]=v});
   const sw={};L(c.swaps).forEach(x=>{const m=x.match(/^(.+?)\s*>\s*(.+)$/);if(m)sw[m[1].trim()]=m[2].trim()});
   const rm={},K={'벤치':'bench','데드':'dead','스쿼트':'squat','ohp':'ohp'};String(c.rm||'').replace(/(벤치|데드|스쿼트|ohp)[^\d]*(\d+(?:\.\d+)?)/gi,(_,a,b)=>{rm[K[a.toLowerCase()]]=+b});
-  return Object.assign({},c,{w,sw,rmv:rm})}
+  const extra=L(c.extra).map(x=>{const m=x.match(/^([^:：]+)[:：]\s*(.+)$/);return m?Object.assign(parseItem(m[2]),{part:m[1].trim()}):Object.assign(parseItem(x),{part:'전체'})}).filter(x=>x.name);
+  const routine=String(c.routine||'').split(/\s*\|\s*/).map(d=>{const m=d.match(/^([^:：]+)[:：](.+)$/);return m?{name:m[1].trim(),items:m[2].split(/\s*[,，]\s*/).map(parseItem).filter(x=>x.name)}:null}).filter(d=>d&&d.items.length);
+  return Object.assign({},c,{w,sw,rmv:rm,extra,routine})}
+/* "종목명 3x12 @24" / "슬리퍼 스트레치 2x30초" / "클램쉘 3x15 @맨몸" */
+function parseItem(t){t=String(t).trim();const m=t.match(/^(.*?)\s+(\d+)\s*[x×X*]\s*([\d~]+\s*(?:초|회|분)?(?:\s*\(각\))?)(?:\s*@\s*(맨몸|[\d.]+)\s*(?:kg)?)?$/);
+  return m?{name:m[1].trim(),s:+m[2],r:m[3].replace(/회$/,'').trim(),w:m[4]||''}:{name:t.replace(/@.*$/,'').trim(),s:0,r:'',w:''}}
+function restFor(r){const n=parseInt(r,10)||10;return /초|분/.test(r||'')?'45초':n<=6?'2~3분':n<=12?'90초':'60초'}
+/* an exercise card for a coaching-added item; borrows guide/alternative/weight rule from the team routine when the name matches */
+function makeEx(it,why){const b=findEx(it.name)||{};const r=it.r||b.r||'10~12';
+  const o={n:it.name,s:it.s||b.s||2,r,rir:b.rir||'2',rest:b.rest&&!it.r?b.rest:restFor(r),why,alt:b.alt,g:b.g,custom:1,part:it.part};
+  if(it.w==='맨몸')o.kg='맨몸';else if(it.w)o.kg=it.w+'kg';else if(b.w)o.w=b.w;else o.kg=b.kg||'맨몸';
+  if(!o.alt)delete o.alt;return o}
 async function fetchCoach(){if(!syncOn())return;
   try{const j=await syncPost({action:'coach',name:PROF.name,pin:PROF.pin});const c=j.coach||null;
     if(JSON.stringify(c)===JSON.stringify(store.get('pt-coach',null)))return;
@@ -99,7 +113,7 @@ async function fetchCoach(){if(!syncOn())return;
     /* 1RM update from the trainer: apply once per coaching week, then weights are recomputed on reload */
     if(COACH&&Object.keys(COACH.rmv).length&&store.get('pt-coach-rm','')!==COACH.week){store.set('pt-coach-rm',COACH.week);
       PROF=Object.assign({},PROF,{rm:Object.assign({},PROF.rm,COACH.rmv)});store.set('pt-profile',PROF);toast('트레이너가 1RM을 갱신했어요');setTimeout(()=>location.reload(),900);return}
-    applyCycle();render(true);if(COACH)toast('이번 주 코칭이 도착했어요')}catch(e){}}
+    applyCycle();session=session.filter(k=>DAYS[k]);if(!session.length)session=[nextDay()];render(true);if(COACH)toast('이번 주 코칭이 도착했어요')}catch(e){}}
 function prof(){return PROF||{name:'',rm:{},kcal:DEFAULT_TARGETS.kcal,prot:DEFAULT_TARGETS.prot}}
 function rnd(v,step){return Math.max(step,Math.round(v/step)*step)}
 function kgOf(w){const base=+((prof().rm||{})[w[0]]||0);if(!base)return '1RM 입력 필요';return w[2]==='db'?`한 손 ${rnd(base*w[1],2)}kg`:`${rnd(base*w[1],2.5)}kg`}
@@ -117,7 +131,7 @@ function save(){store.set(logKey,log)}
 /* rotation: first day in ORDER not yet done this cycle. */
 /* cycle.n counts finished rounds; each new round swaps a few accessories (see applyCycle) */
 let cycle = store.get('pt-cycle',null) || {done:[],n:0};
-cycle.done = cycle.done.filter(k=>ORDER.includes(k));cycle.n=cycle.n||0;
+cycle.done = cycle.done.filter(k=>/^(CH|BK|SH|LG|X\d+)$/.test(k));cycle.n=cycle.n||0;
 function saveCycle(){store.set('pt-cycle',cycle)}
 function nextDay(){return ORDER.find(k=>!cycle.done.includes(k))||ORDER[0]}
 /* returns true when this finished a full round */
@@ -135,13 +149,24 @@ function plan(k,n){const id=k+n;if(planMemo[id])return planMemo[id];
     const order=slots.map(i=>({i,r:rand()})).sort((a,b)=>(last[a.i]||0)-(last[b.i]||0)||a.r-b.r).slice(0,SWAPS_PER_CYCLE);
     picks={};order.forEach(({i})=>{times[i]=(times[i]||0)+1;last[i]=c;picks[i]=(times[i]-1)%ex[i].v.length})}
   return planMemo[id]=picks}
-function applyCycle(){Object.keys(BASE).forEach(k=>{const n=cnFor(k),picks=plan(k,n);
+function applyCycle(){
+  /* a member's own routine replaces the team rotation for that member only */
+  Object.keys(BASE).filter(k=>/^X\d+$/.test(k)).forEach(k=>{delete BASE[k];delete DAYS[k];delete PLATE[k]});
+  const R=COACH&&COACH.routine||[];ORDER.length=0;
+  if(R.length)R.forEach((d,i)=>{const k='X'+(i+1),ex=d.items.map(it=>makeEx(it,'맞춤 루틴'));
+    BASE[k]={tag:'MY ROUTINE · '+d.name,ex};DAYS[k]={name:d.name,sub:ex.slice(0,3).map(e=>e.n).join(' · ')+(ex.length>3?' 외':''),tag:BASE[k].tag,ex:[]};PLATE[k]=XCOL[i%XCOL.length];ORDER.push(k)});
+  else ORDER.push(...TEAM_ORDER);
+  Object.keys(BASE).forEach(k=>{const n=cnFor(k),picks=plan(k,n);
   DAYS[k].tag=BASE[k].tag+' · CYCLE '+(n+1);
   DAYS[k].ex=BASE[k].ex.map((e,i)=>{let o;if(picks[i]!=null){const v=e.v[picks[i]];o=Object.assign({},e,v,{alt:e.n,isNew:1});if(!v.g)delete o.g;if(!v.w)delete o.w;if(v.w)delete o.kg}else o=Object.assign({},e);
     delete o.v;
     const to=COACH&&COACH.sw[o.n];if(to){const d=findEx(to);o=Object.assign({},o,{n:to,alt:o.n,coach:1,isNew:0});delete o.g;delete o.w;o.kg='무게 직접 설정';
       if(d){if(d.w)o.w=d.w;else if(d.kg)o.kg=d.kg;if(d.r)o.r=d.r;if(d.g)o.g=d.g}}
-    if(o.w)o.kg=kgOf(o.w);return o})})}
+    if(o.w)o.kg=kgOf(o.w);return o})});
+  /* coaching extras go after the day's own list so logged set indexes never shift; warm-ups are shown first by items() */
+  const PART={'가슴':'CH','등':'BK','어깨':'SH','하체':'LG'};
+  ((COACH&&COACH.extra)||[]).forEach(it=>{const all=it.part==='웜업'||it.part==='전체'||it.part==='매일';
+    ORDER.filter(k=>all||k===PART[it.part]||DAYS[k].name===it.part).forEach(k=>{const e=makeEx(it,it.part==='웜업'?'웜업 · 트레이너 추가':'트레이너 추가');if(e.w)e.kg=kgOf(e.w);DAYS[k].ex.push(e)})})}
 /* an exercise definition anywhere in the routine (main list or variant pools), by name */
 function findEx(name){for(const k in BASE)for(const e of BASE[k].ex){if(e.n===name)return e;for(const v of e.v||[])if(v.n===name)return v}return null}
 applyCycle();
@@ -237,7 +262,8 @@ async function copyText(txt){
 }
 /* items of a session: one day = all exercises; two days = first 4 of each (main lifts first) */
 function items(keys){
-  if(keys.length===1)return DAYS[keys[0]].ex.map((e,i)=>({k:keys[0],i,e})).filter(x=>!x.e.off&&!isHidden(x.e));
+  const warm=x=>x.e.part==='웜업'?0:1;
+  if(keys.length===1)return DAYS[keys[0]].ex.map((e,i)=>({k:keys[0],i,e})).filter(x=>!x.e.off&&!isHidden(x.e)).sort((a,b)=>warm(a)-warm(b));
   return keys.flatMap(k=>DAYS[k].ex.map((e,i)=>({k,i,e})).filter(x=>!x.e.off&&!isHidden(x.e)).slice(0,4));
 }
 function prog(lg,its){let t=0,d=0;its.forEach(({k,i,e})=>{const n=e.s+extraOf(lg,k,i);t+=n;d+=Math.min(n,setsDone(lg,k,i))});return [d,t]}
@@ -554,7 +580,7 @@ function renderTrain(){
     <div class="sets">${Array.from({length:ns},(_,j)=>`<button type="button" class="s${st.sets[j]?' on':''}" data-j="${j}" aria-pressed="${!!st.sets[j]}" aria-label="${j+1}세트">${j+1}</button>`).join('')}<button type="button" class="sadd" aria-label="세트 추가">+</button>${st.x?`<button type="button" class="sadd ssub" aria-label="추가 세트 빼기">−</button>`:''}</div>
     ${(()=>{const [w,r]=wr(k,i,e,st,L);return `<button type="button" class="wr" aria-label="${esc(e.n)} 무게와 횟수 바꾸기"><span class="wl">무게</span><b>${w?w+'<small>kg</small>':'맨몸'}</b><span class="wx">×</span><b>${r}<small>회</small></b><span class="wh">눌러서 변경</span></button>`})()}
     <div class="exm"><button type="button" class="memob${st.memo?' has':''}" aria-expanded="false">✎ 메모${st.memo?' ·':''}</button><input class="memoin" id="exmemo-${k}-${i}" ${st.memo?'':'hidden'} placeholder="예) 3세트째 어깨 찌릿, 그립 좁게" value="${esc(st.memo||'')}"></div>
-    <div class="exa"><button type="button" class="altb">${sw?'원래 종목으로':'대체 운동으로'} <b>${esc(e.alt)}</b> <span>⇄</span></button><button type="button" class="hideb">이 종목 빼기</button></div>
+    <div class="exa">${e.alt?`<button type="button" class="altb">${sw?'원래 종목으로':'대체 운동으로'} <b>${esc(e.alt)}</b> <span>⇄</span></button>`:''}<button type="button" class="hideb">이 종목 빼기</button></div>
     <details><summary>자세 보기</summary>${guideOf(e)?`<ul class="guide">${Object.entries(guideOf(e)).map(([a,b])=>`<li><span>${a}</span>${esc(b)}</li>`).join('')}</ul>`:''}<a class="yt" href="https://www.youtube.com/results?search_query=${encodeURIComponent(e.n.replace(/\s*\(.*?\)/g,'')+' 자세')}" target="_blank" rel="noopener">▶ 영상으로 자세 보기</a></details>
     </article>`;
   });
@@ -575,7 +601,7 @@ function bindTrain(v){
     const k=art.dataset.k,i=+art.dataset.i,e=effEx(k,i,DAYS[k].ex[i],(log[k]||{})[i]);
     const get=()=>{log[k]=log[k]||{};log[k][i]=log[k][i]||{sets:[],kg:''};return log[k][i]};
     const mb=art.querySelector('.memob'),mi=art.querySelector('.memoin');mb.onclick=()=>{mi.hidden=!mi.hidden;if(!mi.hidden)mi.focus()};mi.oninput=()=>{const st=get();st.memo=mi.value;save();mb.classList.toggle('has',!!mi.value)};
-    art.querySelector('.altb').onclick=()=>{const st=get(),base=DAYS[k].ex[i];st.sw=!isSw(base,st);if(!(st.sets||[]).some(Boolean))st.kg='';st.n=st.sw?base.alt:base.n;save();
+    if(art.querySelector('.altb'))art.querySelector('.altb').onclick=()=>{const st=get(),base=DAYS[k].ex[i];st.sw=!isSw(base,st);if(!(st.sets||[]).some(Boolean))st.kg='';st.n=st.sw?base.alt:base.n;save();
       if(PROF){PROF.prefer=Object.assign({},PROF.prefer);if(st.sw)PROF.prefer[base.n]=base.alt;else delete PROF.prefer[base.n];store.set('pt-profile',PROF)}
       toast(st.sw?'대체 운동으로 바꿨어요. 다음에도 이걸로 나와요':'원래 종목으로 돌렸어요');render(true)};
     art.querySelector('.sadd:not(.ssub)').onclick=()=>{const st=get();st.x=(st.x||0)+1;save();toast('세트를 하나 추가했어요');render(true)};
