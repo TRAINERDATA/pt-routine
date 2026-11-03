@@ -76,7 +76,7 @@ async function flushSync(){
   batch.forEach(k=>{let v=store.get(k,null);if(v==null)return;
     if(k==='pt-profile'){v=Object.assign({},v);delete v.pin}
     const it={key:k,value:v};if(k.startsWith('pt-log-')){if(!Object.keys(v).length)return;it.row=sheetRow(v)}items.push(it)});
-  try{const res=items.length?await syncPost({action:'save',name:PROF.name,pin:PROF.pin,items}):{};syncUnverified=!!res.unverified;
+  try{const res=items.length?await syncPost({action:'save',name:PROF.name,pin:PROF.pin,items,xp:totalXP()}):{};syncUnverified=!!res.unverified;
     const cur=store.get('pt-pending',{});batch.forEach(k=>{if(cur[k]===pend[k])delete cur[k]});
     try{localStorage.setItem('pt-pending',JSON.stringify(cur))}catch(e){}
     syncState=Object.keys(cur).length?'busy':'ok';syncErr='';syncBusy=false;
@@ -194,7 +194,7 @@ function monday(){const m=new Date(now);m.setDate(now.getDate()-((now.getDay()+6
 function weekCount(){const m=monday();let n=0;for(let i=0;i<7;i++){const d=new Date(m);d.setDate(m.getDate()+i);if(active(lgOf(ymd(d))))n++}return n}
 
 /* ---------- shared ---------- */
-let view = ({'#train':'train','#food':'food','#log':'log','#set':'set','#team':'team'})[location.hash]||'home';
+let view = ({'#train':'train','#food':'food','#log':'log','#set':'set','#team':'team','#dash':'dash'})[location.hash]||'home';
 let session = [ (doneKeys(log)[0]) || nextDay() ];   // 1 or 2 day keys
 let comboMode = false, homeMode = '';
 let toastT;
@@ -847,6 +847,7 @@ function renderTeam(){const pin=store.get('pt-admin','');
   if(!team)return `<div class="sec">${head}<p class="small">${teamErr?esc(teamErr):'불러오는 중...'}</p>${teamErr?'<button class="btn ghost" type="button" id="t-re">다시 시도</button>':''}</div>`;
   const R=team.rows,act=R.filter(r=>r[1]).length;
   return `<div class="sec">${head}
+  <button class="btn gold" type="button" data-go="dash">📊 팀 대시보드 보기</button>
   <div class="stats"><div class="t"><small>회원</small><b>${R.length}</b><em>명</em></div><div class="t"><small>오늘 운동</small><b>${act}</b><em>명</em></div><div class="t"><small>이번 주 평균</small><b>${R.length?(R.reduce((a,r)=>a+(+r[2]||0),0)/R.length).toFixed(1):'-'}</b><em>회</em></div></div>
   <div class="panel"><h3>주간 코칭</h3><p class="small" style="margin:0">① 전체 회원의 이번 주 기록을 복사해서 Claude에게 붙여넣어요. ② Claude가 준 코드 블록 내용을 아래에 붙여넣고 보내면, 회원마다 각자 앱에 코칭이 떠요.</p>
   <button class="btn gold" type="button" id="t-copy">① 이번 주 전체 기록 복사 (Claude용)</button><span class="small" style="text-align:center">${team.weekly?`회원 ${team.weekly.members}명 · ${team.weekly.days}일치 기록`:teamWkErr?esc(teamWkErr):'불러오는 중...'}</span>
@@ -880,6 +881,45 @@ function bindTeam(){const $=id=>document.getElementById(id);
   if($('t-out'))$('t-out').onclick=()=>{store.set('pt-admin','');team=null;teamErr='';render(true)};
   if(store.get('pt-admin','')&&!team&&!teamErr)loadTeam()}
 
+/* ---------- TEAM DASHBOARD (trainer): characters, days trained, per-exercise totals ---------- */
+let dashDays=7,dashData={},dashErr='',dashBusy=false,dashOpen='';
+const PART_NAME={CH:'가슴',BK:'등',SH:'어깨',LG:'하체'};
+function dashDates(){const out=[];for(let i=dashDays-1;i>=0;i--){const d=new Date(now);d.setDate(now.getDate()-i);out.push(ymd(d))}return out}
+function dashStats(m,dates){let days=0,sets=0,vol=0,cardio=0;const parts={},ex={},on={};
+  dates.forEach(d=>{const lg=m.logs[d];if(!lg)return;let tr=false;
+    Object.keys(lg).forEach(k=>{if(!/^(CH|BK|SH|LG|X\d+)$/.test(k))return;Object.entries(lg[k]||{}).forEach(([i,st])=>{const n=((st&&st.sets)||[]).filter(Boolean).length;if(!n)return;tr=true;sets+=n;
+      const pk=parseKg(st.kg)||bodyKg(st.kg)||[0,0],v=pk[0]*pk[1]*n;vol+=v;const name=st.n||(((BASE[k]||{}).ex||[])[i]||{}).n||'기타';
+      const E=ex[name]||(ex[name]={sets:0,vol:0,best:0,reps:0});E.sets+=n;E.vol+=v;if(pk[0]>=E.best){E.best=pk[0];E.reps=pk[1]}
+      const pn=PART_NAME[k]||'맞춤 루틴';parts[pn]=(parts[pn]||0)+n})});
+    if(lg.cardio){tr=true;cardio++}if(lg.done&&Object.values(lg.done).some(Boolean))tr=true;if(tr){days++;on[d]=lg.cardio&&!Object.keys(lg).some(k=>/^(CH|BK|SH|LG|X\d+)$/.test(k))?'c':'w'}});
+  return {days,sets,vol,cardio,parts,ex,on}}
+const ton=v=>v>=1000?(v/1000).toFixed(1)+'t':Math.round(v)+'kg';
+function renderDash(){const head=`<div class="row"><div><span class="eyebrow">Trainer</span><h2 style="font-size:28px">팀 대시보드</h2></div><span class="sp"></span><button type="button" class="toggle" data-go="team">← 팀 현황</button></div>
+  <div class="cyc" style="grid-template-columns:1fr 1fr">${[[7,'최근 7일'],[28,'최근 4주']].map(([d,l])=>`<span class="${dashDays===d?'nx':''}" data-dd="${d}" style="cursor:pointer">${l}</span>`).join('')}</div>`;
+  const D=dashData[dashDays];if(!store.get('pt-admin',''))return `<div class="sec">${head}<p class="small">팀 현황에서 관리자 PIN을 먼저 넣어주세요.</p></div>`;
+  if(!D)return `<div class="sec">${head}<p class="small">${dashErr?esc(dashErr):'불러오는 중...'}</p>${dashErr?'<button class="btn ghost" type="button" id="d-re">다시 시도</button>':''}</div>`;
+  const dates=dashDates(),M=D.members.map(m=>Object.assign({},m,{st:dashStats(m,dates),lv:lvOf(m.xp||0)})).sort((a,b)=>b.st.days-a.st.days||b.st.vol-a.st.vol);
+  const act=M.filter(m=>m.st.days).length,tDays=M.reduce((a,m)=>a+m.st.days,0),tSets=M.reduce((a,m)=>a+m.st.sets,0),tVol=M.reduce((a,m)=>a+m.st.vol,0);
+  const medal=i=>['🥇','🥈','🥉'][i]||'';
+  return `<div class="sec">${head}
+  <div class="stats" style="grid-template-columns:repeat(4,minmax(0,1fr))"><div class="t"><small>활동</small><b>${act}</b><em>/${M.length}명</em></div><div class="t"><small>운동일</small><b>${tDays}</b><em>일</em></div><div class="t"><small>세트</small><b>${tSets}</b></div><div class="t"><small>볼륨</small><b>${ton(tVol).replace(/[a-z]+$/,'')}</b><em>${tVol>=1000?'t':'kg'}</em></div></div>
+  ${M.map((m,i)=>{const s=m.st,tot=Object.values(s.parts).reduce((a,b)=>a+b,0),m01=Math.min(1,(m.lv-1)/29),top=Object.entries(s.ex).sort((a,b)=>b[1].sets-a[1].sets);
+    return `<div class="panel dcard${s.days?'':' idle'}"><div class="dtop"><span class="dav">${charSVG(m01,s.days?Math.max(1,poseFor(m.lv)):0,(m.profile||{}).look)}</span>
+    <div class="dinfo"><div class="row"><b class="dname">${medal(s.days?i:9)} ${esc(m.name)}</b><span class="sp"></span><span class="eyebrow">LV ${m.lv} · ${titleOf(m.lv)}</span></div>
+    <div class="dnums"><span><b>${s.days}</b>일</span><span><b>${s.sets}</b>세트</span><span><b>${ton(s.vol)}</b></span>${s.cardio?`<span><b>${s.cardio}</b>유산소</span>`:''}</div>
+    <div class="dstrip" style="grid-template-columns:repeat(${dates.length},1fr)">${dates.map(d=>`<i class="${s.on[d]||''}" title="${md(d)}"></i>`).join('')}</div>
+    ${tot?`<div class="dparts">${Object.entries(s.parts).map(([p,n])=>`<i style="width:${n/tot*100}%;background:var(${PLATE[Object.keys(PART_NAME).find(k=>PART_NAME[k]===p)]||'--p-violet'})" title="${p}"></i>`).join('')}</div><div class="dlegend">${Object.entries(s.parts).map(([p,n])=>`<span>${p} ${Math.round(n/tot*100)}%</span>`).join('')}</div>`:''}</div></div>
+    ${top.length?`<button type="button" class="dmore" data-dex="${esc(m.name)}">${dashOpen===m.name?'▾':'▸'} 종목별 기록 ${top.length}개</button>${dashOpen===m.name?`<div class="dex">${top.map(([n,e])=>`<div class="row"><span style="flex:1;min-width:0">${esc(n)}</span><span class="small">${e.sets}세트 · 최고 <b style="color:var(--fg)">${e.best?e.best+'kg':'맨몸'}×${e.reps}</b> · ${ton(e.vol)}</span></div>`).join('')}</div>`:''}`:'<p class="small" style="margin:0">이 기간 운동 기록이 없어요</p>'}</div>`}).join('')}
+  <p class="small" style="margin:0">색칠된 칸 = 운동한 날 (파랑 = 유산소만). 볼륨 = 무게 × 횟수 × 세트. 레벨은 회원 앱이 마지막으로 저장할 때 기준이에요.</p></div>`}
+async function loadDash(){const pin=store.get('pt-admin','');if(!pin||dashBusy)return;dashBusy=true;
+  try{const j=await syncPost({action:'dash',admin:pin,days:28});dashData[7]=dashData[28]=j;dashErr=''}catch(e){dashErr=e.message||'불러오지 못했어요'}
+  dashBusy=false;if(view==='dash')render(true)}
+function bindDash(){document.querySelectorAll('#view [data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+  document.querySelectorAll('[data-dd]').forEach(b=>b.onclick=()=>{dashDays=+b.dataset.dd;render(true)});
+  document.querySelectorAll('[data-dex]').forEach(b=>b.onclick=()=>{dashOpen=dashOpen===b.dataset.dex?'':b.dataset.dex;render(true)});
+  const re=document.getElementById('d-re');if(re)re.onclick=()=>{dashErr='';render(true);loadDash()};
+  if(!dashData[dashDays]&&!dashErr)loadDash()}
+
 /* ---------- welcome splash: once every few hours when the app opens ---------- */
 function greet(){if(!PROF||view==='set')return;const last=+store.get('pt-hello',0);if(Date.now()-last<3*36e5)return;store.set('pt-hello',Date.now());
   const x=totalXP(),lv=lvOf(x),m=Math.min(1,(lv-1)/29),done=doneKeys(log).length>0;
@@ -900,6 +940,7 @@ function render(keepScroll){
   else if(view==='food'){v.innerHTML=renderFood();bindFood(v)}
   else if(view==='set'){v.innerHTML=renderSet();bindSet()}
   else if(view==='team'){v.innerHTML=renderTeam();bindTeam()}
+  else if(view==='dash'){v.innerHTML=renderDash();bindDash()}
   else {v.innerHTML=renderLog();bindLog(v)}
   if(keepScroll)window.scrollTo(0,y);
 }

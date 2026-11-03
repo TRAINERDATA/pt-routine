@@ -12,7 +12,7 @@
    - 설정: B2 칸에 관리자 PIN을 적으면 웹앱 기록 탭의 "팀 현황 (트레이너용)"에서 현황을 볼 수 있어요 */
 
 const LOG_HEAD = ['이름', '날짜', '운동', '완료 세트', '종목별 기록', '칼로리', '단백질(g)', '체중', '걸음 수', '수면', '컨디션', '통증', '식단', '마지막 저장'];
-const MEM_HEAD = ['이름', 'PIN 확인값', '벤치 1RM', '데드 1RM', '스쿼트 1RM', 'OHP 1RM', '사이클', '가입', '마지막 저장'];
+const MEM_HEAD = ['이름', 'PIN 확인값', '벤치 1RM', '데드 1RM', '스쿼트 1RM', 'OHP 1RM', '사이클', '가입', '마지막 저장', 'XP'];
 const RAW_HEAD = ['이름', '키', '데이터', '저장 시각'];
 const COACH_HEAD = ['이름', '주 시작일', '한줄 코멘트', '잘한 점', '고칠 점', '다음 주 목표', '무게 지정', '종목 교체', '1RM 갱신', '추가 종목', '맞춤 루틴'];
 const STATUS_HEAD = ['이름', '오늘', '이번 주 운동', '최근 운동일', '최근 체중', '마지막 저장'];
@@ -61,6 +61,7 @@ function handle(req) {
   if (req.action === 'weekly') return weekly(req);
   if (req.action === 'coachadd') return coachAdd(req);
   if (req.action === 'delmember') return delMember(req);
+  if (req.action === 'dash') return dash(req);
   if (req.action === 'check') { const a = auth(req, false); return a.error ? {ok: false, error: a.error} : {ok: true}; }
   return {ok: false, error: '알 수 없는 요청'};
 }
@@ -96,7 +97,7 @@ function auth(req, create) {
     if (String(rows[r][0]) === name) return rows[r][1] === h ? {row: r + 1, name: name} : {error: 'PIN이 맞지 않아요'};
   }
   if (!create) return {error: '그 이름으로 저장된 기록이 없어요'};
-  sh.appendRow([name, h, '', '', '', '', '', now(), now()]);
+  sh.appendRow([name, h, '', '', '', '', '', now(), now(), 0]);
   return {row: sh.getLastRow(), name: name};
 }
 
@@ -134,6 +135,11 @@ function save(req) {
     saved++;
   });
   mem.getRange(a.row, 9).setValue(t);
+  if (req.xp != null && isFinite(+req.xp)) {
+    const head = mem.getDataRange().getValues()[0] || [];
+    if (head.length < MEM_HEAD.length) mem.getRange(1, 1, 1, MEM_HEAD.length).setValues([MEM_HEAD]);
+    mem.getRange(a.row, 10).setValue(+req.xp);
+  }
   writeStatus();
   return {ok: true, saved: saved, at: t};
 }
@@ -352,4 +358,27 @@ function delMember(req) {
   });
   writeStatus();
   return n ? {ok: true, removed: n} : {ok: false, error: '그 이름의 회원이 없어요'};
+}
+
+/* trainer dashboard: every member's profile, XP and raw logs for the last N days (the app does the math) */
+function dash(req) {
+  const err = adminError(req);
+  if (err) return {ok: false, error: err};
+  const days = Math.min(56, Math.max(1, +req.days || 28));
+  const from = Utilities.formatDate(new Date(new Date().getTime() - (days - 1) * 864e5), 'Asia/Seoul', 'yyyy-MM-dd');
+  const members = {};
+  sheet('회원', MEM_HEAD).getDataRange().getValues().slice(1).forEach(r => {
+    const n = String(r[0]).trim();
+    if (n) members[n] = {name: n, xp: +r[9] || 0, rm: {bench: r[2], dead: r[3], squat: r[4], ohp: r[5]}, cycle: r[6], profile: null, logs: {}};
+  });
+  sheet('원본', RAW_HEAD).getDataRange().getValues().slice(1).forEach(r => {
+    const m = members[String(r[0]).trim()], key = String(r[1]);
+    if (!m) return;
+    try {
+      if (key === 'pt-profile') m.profile = JSON.parse(r[2]);
+      else if (key.indexOf('pt-log-') === 0 && key.slice(7) >= from) m.logs[key.slice(7)] = JSON.parse(r[2]);
+    } catch (e) {}
+  });
+  Object.keys(members).forEach(n => { const p = members[n].profile; if (p) members[n].profile = {look: p.look || null}; });
+  return {ok: true, from: from, days: days, members: Object.keys(members).map(n => members[n]), at: now()};
 }
